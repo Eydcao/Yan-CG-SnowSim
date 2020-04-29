@@ -1,0 +1,10 @@
+.vs/
+.vscode/
+bin/
+build/
+othersBackup/
+*.exe
+*.bmp
+images/
+*.png
+*.ppm
