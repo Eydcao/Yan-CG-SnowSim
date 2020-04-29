@@ -2,6 +2,7 @@
 #define SNOWSIM_SNOWPARTICLES
 
 #include "Shape.hpp"
+#include <iostream>
 using namespace Eigen;
 
 struct SnowParticleMaterial
@@ -9,25 +10,27 @@ struct SnowParticleMaterial
     // TODO add more related data inside later, give them defualt values
     float density = 1.;
     float youngsModule = 1.;
-    int lNumDensity = 10;
+    int lNumDensity = 1;
     // etc
 };
 
 class SnowParticle
 {
    private:
-    SnowParticleMaterial* m;
+   public:
     Vector3f position;
     Vector3f velocity;
     Vector3f deformationGradient;
 
-   public:
+    SnowParticleMaterial* m;
+
     SnowParticle();
     SnowParticle(const Vector3f& pos, SnowParticleMaterial* material);
     ~SnowParticle();
 };
 
-SnowParticle::SnowParticle() : position(), m(nullptr)
+SnowParticle::SnowParticle()
+    : position(), velocity(), deformationGradient(), m(nullptr)
 {
 }
 
@@ -43,9 +46,9 @@ SnowParticle::~SnowParticle()
 class SnowParticleSet
 {
    private:
+   public:
     std::vector<SnowParticle*> particles;
 
-   public:
     SnowParticleSet();
     ~SnowParticleSet();
     void addParticle(SnowParticle* sp);
@@ -58,7 +61,7 @@ class SnowParticleSet
     // sets);
 };
 
-SnowParticleSet::SnowParticleSet()
+SnowParticleSet::SnowParticleSet() : particles()
 {
 }
 
@@ -84,7 +87,9 @@ void SnowParticleSet::addParticle(const Vector3f& pos, SnowParticleMaterial* m)
 void SnowParticleSet::addParticlesInAShape(Shape* s, SnowParticleMaterial* m)
 {
     std::vector<Vector3f> tempPos;
-    if (s->generateParticlesInside(m->lNumDensity, tempPos) > 0)
+    int temp = s->generateParticlesInside(m->lNumDensity, tempPos);
+    // std::cout << " size is " << temp << std::endl;
+    if (temp > 0)
     {
         for (const auto& onePos : tempPos)
         {

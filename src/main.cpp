@@ -11,8 +11,28 @@
 #include <iostream>
 
 // Main function for snow simulation
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
-    std::cout << "hello snow simulation" << std::endl;
+    // tests
+    {
+        std::cout << "hello snow simulation tests" << std::endl;
+    }
+    {
+        std::cout << "test p generation in a sphere" << std::endl;
+        SnowParticleMaterial m;
+        m.lNumDensity = 2;
+        Sphere Omega(Vector3f(0.0, 0.0, 0.0), 10.0);
+        SnowParticleSet spSet;
+        spSet.addParticlesInAShape(&Omega, &m);
+        assert(spSet.particles.size() == 30976);
+        for (auto& anyParticle : spSet.particles)
+        {
+            assert(anyParticle->m == &m);
+        }
+    }
+    {
+        std::cout << "all snow simulation tests passed" << std::endl;
+    }
+    // end tests
     return 0;
 }
