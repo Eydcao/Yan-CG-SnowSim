@@ -10,6 +10,7 @@
 #include "SnowParticle.hpp"
 #include "Sphere.hpp"
 #include "Triangle.hpp"
+#include <GL/glut.h>
 #include <iostream>
 
 // Main function for snow simulation
