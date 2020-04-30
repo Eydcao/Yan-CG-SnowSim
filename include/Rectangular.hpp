@@ -17,9 +17,59 @@ class Rectangular : public Shape
         pMax = Vector3f(fmax(p1.x(), p2.x()), fmax(p1.y(), p2.y()),
                         fmax(p1.z(), p2.z()));
     }
+    float getArea()
+    {
+        Vector3f d = pMax - pMin;
+        return 2 * (d.x() * d.y() + d.x() * d.z() + d.y() * d.z());
+    }
+    float getVolume()
+    {
+        Vector3f d = pMax - pMin;
+        return d.x() * d.y() * d.z();
+    }
     Bounds3 getBounds()
     {
         return Bounds3(pMin, pMax);
+    }
+    Intersection getIntersection(Ray ray)
+    {
+        Intersection inter;
+        Vector3f invDir = ray.direction_inv;
+        std::array<int, 3> dirIsNeg = {(ray.direction.x() > 0),
+                                       (ray.direction.y() > 0),
+                                       (ray.direction.z() > 0)};
+        Vector3f txyzMin = (this->pMin - ray.origin).cwiseProduct(invDir);
+        Vector3f txyzMax = (this->pMax - ray.origin).cwiseProduct(invDir);
+        double tmin = fmax(fmax((dirIsNeg[0] == 0) ? txyzMax.x() : txyzMin.x(),
+                                (dirIsNeg[1] == 0) ? txyzMax.y() : txyzMin.y()),
+                           (dirIsNeg[2] == 0) ? txyzMax.z() : txyzMin.z());
+        double tmax = fmin(fmin((dirIsNeg[0] == 1) ? txyzMax.x() : txyzMin.x(),
+                                (dirIsNeg[1] == 1) ? txyzMax.y() : txyzMin.y()),
+                           (dirIsNeg[2] == 1) ? txyzMax.z() : txyzMin.z());
+        // check if its correct when equal
+        // check if epsilon will help
+        if (tmin < 0) tmin = tmax;
+        if (tmin < 0) return inter;
+        inter.happened = true;
+
+        inter.coords = ray.origin + ray.direction * tmin;
+        Vector3f tempNormal(0.0, 0.0, 0.0);
+        if (std::abs(inter.coords.x() - pMin.x()) < EPSILON)
+            tempNormal += Vector3f(-1., 0., 0.);
+        else if (std::abs(inter.coords.x() - pMax.x()) < EPSILON)
+            tempNormal += Vector3f(1., 0., 0.);
+        if (std::abs(inter.coords.y() - pMin.y()) < EPSILON)
+            tempNormal += Vector3f(0., -1., 0.);
+        else if (std::abs(inter.coords.y() - pMax.y()) < EPSILON)
+            tempNormal += Vector3f(0., 1., 0.);
+        if (std::abs(inter.coords.z() - pMin.z()) < EPSILON)
+            tempNormal += Vector3f(0., 0., -1.);
+        else if (std::abs(inter.coords.z() - pMax.z()) < EPSILON)
+            tempNormal += Vector3f(0., 0., 1.);
+        inter.normal = tempNormal.normalized();
+        inter.shape = this;
+        inter.distance = tmin;
+        return inter;
     }
     bool isInside(const Vector3f &pos)
     {

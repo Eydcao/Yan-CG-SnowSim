@@ -14,4 +14,5 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -pthread")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 
 add_executable(SnowSim
-               src/main.cpp)
+               src/main.cpp
+               src/BVH.cpp)

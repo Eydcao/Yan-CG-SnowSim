@@ -9,6 +9,7 @@
 #include "Rectangular.hpp"
 #include "SnowParticle.hpp"
 #include "Sphere.hpp"
+#include "Triangle.hpp"
 #include <iostream>
 
 // Main function for snow simulation
@@ -39,6 +40,23 @@ int main(int argc, char** argv)
         SnowParticleSet spSet;
         spSet.addParticlesInAShape(&Box, &m);
         assert(spSet.particles.size() == 8000);
+        for (auto& anyParticle : spSet.particles)
+        {
+            assert(anyParticle->m == &m);
+        }
+    }
+    {
+        std::cout << "test p generation in a closed tri mesh" << std::endl;
+        SnowParticleMaterial m;
+        m.lNumDensity = 10;
+        MeshTriangle cow("../media/spot_triangulated_good.obj");
+        SnowParticleSet spSet;
+        spSet.addParticlesInAShape(&cow, &m);
+        std::cout << " the vol ratio is "
+                  << cow.getVolume() / (cow.getBounds().volume()) << std::endl;
+        std::cout << " the size ratio is "
+                  << spSet.particles.size() / 9. / 16. / 17. << std::endl;
+        // assert(spSet.particles.size() == 8000);
         for (auto& anyParticle : spSet.particles)
         {
             assert(anyParticle->m == &m);

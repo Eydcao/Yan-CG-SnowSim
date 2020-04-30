@@ -6,6 +6,8 @@
 
 #ifndef SNOWSIM_BOUNDS3
 #define SNOWSIM_BOUNDS3
+#include "Ray.hpp"
+#include "global.hpp"
 #include <array>
 #include <eigen3/Eigen/Eigen>
 #include <limits>
@@ -55,6 +57,12 @@ class Bounds3
         return 2 * (d.x() * d.y() + d.x() * d.z() + d.y() * d.z());
     }
 
+    double volume() const
+    {
+        Vector3f d = Diagonal();
+        return d.x() * d.y() * d.z();
+    }
+
     Vector3f Centroid()
     {
         return 0.5 * pMin + 0.5 * pMax;
@@ -95,6 +103,8 @@ class Bounds3
     {
         return (i == 0) ? pMin : pMax;
     }
+    inline bool IntersectP(const Ray& ray, const Vector3f& invDir,
+                           const std::array<int, 3>& dirisNeg) const;
 };
 
 inline Bounds3 Union(const Bounds3& b1, const Bounds3& b2)
@@ -117,6 +127,28 @@ inline Bounds3 Union(const Bounds3& b, const Vector3f& p)
     ret.pMax = Vector3f(fmax(b.pMax.x(), p.x()), fmax(b.pMax.y(), p.y()),
                         fmax(b.pMax.z(), p.z()));
     return ret;
+}
+
+inline bool Bounds3::IntersectP(const Ray& ray, const Vector3f& invDir,
+                                const std::array<int, 3>& dirIsNeg) const
+{
+    // invDir: ray direction(x,y,z), invDir=(1.0/x,1.0/y,1.0/z), use this
+    // because Multiply is faster that Division dirIsNeg: ray direction(x,y,z),
+    // dirIsNeg=[int(x>0),int(y>0),int(z>0)], use this to simplify your logic
+    // test if ray bound intersects
+    // txyz min or max, note here * is coef_wise_product
+    Vector3f txyzMin = (this->pMin - ray.origin).cwiseProduct(invDir);
+    Vector3f txyzMax = (this->pMax - ray.origin).cwiseProduct(invDir);
+    // tmin and tmax
+    double tmin = fmax(fmax((dirIsNeg[0] == 0) ? txyzMax.x() : txyzMin.x(),
+                            (dirIsNeg[1] == 0) ? txyzMax.y() : txyzMin.y()),
+                       (dirIsNeg[2] == 0) ? txyzMax.z() : txyzMin.z());
+    double tmax = fmin(fmin((dirIsNeg[0] == 1) ? txyzMax.x() : txyzMin.x(),
+                            (dirIsNeg[1] == 1) ? txyzMax.y() : txyzMin.y()),
+                       (dirIsNeg[2] == 1) ? txyzMax.z() : txyzMin.z());
+    // check if its correct when equal
+    // check if epsilon will help
+    return tmin <= tmax + EPSILON && tmax >= -EPSILON;
 }
 
 #endif  // SNOWSIM_BOUNDS3

@@ -26,6 +26,35 @@ class Sphere : public Shape
                        Vector3f(center.x() + radius, center.y() + radius,
                                 center.z() + radius));
     }
+    float getArea()
+    {
+        return 4. * M_PI * radius2;
+    }
+    float getVolume()
+    {
+        return 4. / 3. * M_PI * radius2 * radius;
+    }
+    Intersection getIntersection(Ray ray)
+    {
+        Intersection result;
+        result.happened = false;
+        Vector3f L = ray.origin - center;
+        float a = ray.direction.squaredNorm();
+        float b = 2. * ray.direction.dot(L);
+        float c = L.squaredNorm() - radius2;
+        float t0, t1;
+        if (!solveQuadratic(a, b, c, t0, t1)) return result;
+        if (t0 < 0) t0 = t1;
+        if (t0 < 0) return result;
+        result.happened = true;
+
+        result.coords = ray.origin + ray.direction * t0;
+        result.normal = (result.coords - center).normalized();
+        // result.m = this->m;
+        result.shape = this;
+        result.distance = t0;
+        return result;
+    }
     bool isInside(const Vector3f &pos)
     {
         return (pos - center).squaredNorm() <= radius2;
