@@ -42,6 +42,7 @@ bool gMousePressed = false;
 // GLuint gSurfaceLists[3];
 GLuint gAxisList;
 GLuint gPointList;
+GLuint gSurfaceLists;
 
 // These STL Vectors store the control points, curves, and
 // surfaces that will end up being drawn.  In addition, parallel
@@ -55,6 +56,8 @@ GLuint gPointList;
 
 // One big snow particle group
 SnowParticleSet wholeSPSet;
+bool printTestMesh = false;
+MeshTriangle aTestMesh("../media/spot_triangulated_good.obj");
 
 // Declarations of functions whose implementations occur later.
 void arcballRotation(int endX, int endY);
@@ -88,6 +91,9 @@ void keyboardFunc(unsigned char key, int x, int y)
         case 'S':
             std::cout << "start simulation" << std::endl;
             // TODO add simulation function here
+            break;
+        case 'h':
+            printTestMesh = !printTestMesh;
             break;
         // case 'c':
         // case 'C':
@@ -212,6 +218,7 @@ void drawScene(void)
 
     // if (gPointMode) glCallList(gPointList);
     glCallList(gPointList);
+    if (printTestMesh) glCallList(gSurfaceLists);
 
     // Dump the image to the screen.
     glutSwapBuffers();
@@ -327,6 +334,7 @@ void makeDisplayLists()
     // gSurfaceLists[2] = glGenLists(1);
     gAxisList = glGenLists(1);
     gPointList = glGenLists(1);
+    gSurfaceLists = glGenLists(1);
 
     // Compile the display lists
 
@@ -350,6 +358,37 @@ void makeDisplayLists()
     //         drawSurface(gSurfaces[i], true);
     // }
     // glEndList();
+
+    glNewList(gSurfaceLists, GL_COMPILE);
+    {
+        // This will use the current material color and light
+        // positions.  Just set these in drawScene();
+        glEnable(GL_LIGHTING);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        // This tells openGL to *not* draw backwards-facing triangles.
+        // This is more efficient, and in addition it will help you
+        // make sure that your triangles are drawn in the right order.
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glBegin(GL_TRIANGLES);
+        for (auto& oneTri : aTestMesh.triangles)
+        {
+            Vector3f normal = oneTri.normal;
+            Vector3f v0 = oneTri.v0;
+            Vector3f v1 = oneTri.v1;
+            Vector3f v2 = oneTri.v2;
+            glNormal(normal);
+            glVertex(v0);
+            glNormal(normal);
+            glVertex(v1);
+            glNormal(normal);
+            glVertex(v2);
+        }
+        glEnd();
+        glPopAttrib();
+    }
+    glEndList();
 
     // glNewList(gSurfaceLists[2], GL_COMPILE);
     // {
@@ -443,7 +482,7 @@ int main(int argc, char** argv)
         std::cout << "hello snow simulation tests" << std::endl;
     }
     {
-        std::cout << "test p generation in a sphere" << std::endl;
+        std::cout << "test p generation in a sphere: ";
         SnowParticleMaterial m;
         m.lNumDensity = 2;
         Sphere Omega(Vector3f(0.0, 0.0, 0.0), 10.0);
@@ -454,9 +493,10 @@ int main(int argc, char** argv)
         {
             assert(anyParticle->m == &m);
         }
+        std::cout << " PASSED" << std::endl;
     }
     {
-        std::cout << "test p generation in a box" << std::endl;
+        std::cout << "test p generation in a box :";
         SnowParticleMaterial m;
         m.lNumDensity = 2;
         Rectangular Box(Vector3f(0.0, 0.0, 0.0), Vector3f(10.0, 10.0, 10.0));
@@ -467,33 +507,56 @@ int main(int argc, char** argv)
         {
             assert(anyParticle->m == &m);
         }
+        std::cout << " PASSED" << std::endl;
     }
     {
-        std::cout << "test p generation in a closed tri mesh" << std::endl;
+        std::cout << "test ray tri intersection :";
+        Triangle tri1(Vector3f(1., 0., 0.), Vector3f(0., 1., 0.),
+                      Vector3f(0., 0., 1.));
+        Ray ray1(Vector3f(0., 0., 0.), Vector3f(1., 1., 1.), 0.);
+        Intersection inter;
+        inter = tri1.getIntersection(ray1);
+        assert(inter.happened == true);
+        assert(std::abs(inter.distance - 0.57735) < EPSILON);
+        assert((inter.coords - Vector3f(1. / 3., 1. / 3., 1. / 3.)).norm() <
+               EPSILON);
+        // std::cout << " inter happened " << inter.happened << std::endl;
+        // std::cout << " inter t " << inter.distance << std::endl;
+        // std::cout << " inter coord " << inter.coords << std::endl;
+
+        // return 0;
+        std::cout << " PASSED" << std::endl;
+    }
+    {
+        std::cout << "test p generation in a closed tri mesh :";
         SnowParticleMaterial m;
-        m.lNumDensity = 10;
+        m.lNumDensity = 100;
         MeshTriangle cow("../media/spot_triangulated_good.obj");
         SnowParticleSet spSet;
         spSet.addParticlesInAShape(&cow, &m);
-        std::cout << " the vol ratio is "
-                  << cow.getVolume() / (cow.getBounds().volume()) << std::endl;
-        std::cout << " the size ratio is "
-                  << spSet.particles.size() / 9. / 16. / 17. << std::endl;
+        assert(std::abs(cow.getVolume() / (cow.getBounds().volume()) -
+                        spSet.particles.size() / 94. / 169. / 171.) < 0.01);
+        // std::cout << " the vol ratio is "
+        //           << cow.getVolume() / (cow.getBounds().volume()) <<
+        //           std::endl;
+        // std::cout << " the size ratio is "
+        //           << spSet.particles.size() / 94. / 169. / 171. << std::endl;
         // assert(spSet.particles.size() == 8000);
         for (auto& anyParticle : spSet.particles)
         {
             assert(anyParticle->m == &m);
         }
+        std::cout << " PASSED" << std::endl;
     }
     {
-        std::cout << "all snow simulation tests passed" << std::endl;
+        std::cout << "all snow simulation tests PASSED" << std::endl;
     }
     // end tests
 
     // snow sim
     // std::cout << "test p generation in a closed tri mesh" << std::endl;
     SnowParticleMaterial m;
-    m.lNumDensity = 10;
+    m.lNumDensity = 100;
     MeshTriangle cow("../media/spot_triangulated_good.obj");
     // SnowParticleSet spSet;
     wholeSPSet.addParticlesInAShape(&cow, &m);

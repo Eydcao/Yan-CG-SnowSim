@@ -55,11 +55,10 @@ class Triangle : public Shape
     {
         Intersection inter;
 
-        if (ray.direction.dot(normal) > 0) return inter;
+        if (std::abs(ray.direction.dot(normal)) < EPSILON) return inter;
         double u, v, t_tmp = 0;
         Vector3f pvec = ray.direction.cross(e2);
         double det = e1.dot(pvec);
-        if (fabs(det) < EPSILON) return inter;
 
         double det_inv = 1. / det;
         Vector3f tvec = ray.origin - v0;
@@ -134,7 +133,7 @@ class MeshTriangle : public Shape
 
         std::vector<Shape*> ptrs;
 
-        std::cout << "how many triangles " << triangles.size() << std::endl;
+        // std::cout << "how many triangles " << triangles.size() << std::endl;
 
         volume = 0.;
 
@@ -178,35 +177,43 @@ class MeshTriangle : public Shape
     }
     bool isInside(const Vector3f& pos)
     {
-        Vector3f outerPos = bounding_box.pMax + bounding_box.Diagonal();
-        Ray ray(pos, (outerPos - pos).normalized(), 0.0);
-        // Vector3f dir = Vector3f(1., 1., 1.).normalized();
-        // Ray ray(pos, dir, 0.0);
+        // Vector3f outerPos = bounding_box.pMax + bounding_box.Diagonal();
+        // Ray ray(pos, (outerPos - pos).normalized(), 0.0);
+        Vector3f dir = Vector3f(1., 1., 1.).normalized();
+        Ray ray(pos, dir, 0.0);
         std::vector<Intersection> tempInters = {};
         this->bvh->allIntersect(ray, tempInters);
-        // connect a ray between pos and outer pos
-        // use bvh to traverse all possible intersections (ts)
         std::vector<float> ts;
-        bool isNearParticle = false;
         for (auto& oneInter : tempInters)
         {
-            if (std::abs(oneInter.distance) < 0.00866) isNearParticle = true;
+            // TODO consider very close ts, if they are the same intersect or
+            // tangential to surface
             ts.push_back(oneInter.distance);
         }
-        if (isNearParticle) return true;
         int size = ts.size();
-        // std::cout << "intersection size is " << size << std::endl;
-        // TODO consider very close ts, if they are the same intersect or
-        // tangential to the surface
-        // int size = tempInters.size();
-        // if (size == 2)
+        // // if (isNearParticle) return true;
+        // int size = ts.size();
+        // if (size > 2)
         // {
         //     std::cout << "intersection size is " << size << std::endl;
-        //     std::cout << "t1 is " << ts[0] << std::endl;
-        //     if (size == 2) std::cout << "t2 is " << ts[1] << std::endl;
+        //     for (auto& oneDist : ts)
+        //     {
+        //         std::cout << "intersection dist is " << oneDist << std::endl;
+        //     }
         // }
-        // std::cout << " intersection for this particle is " << size <<
-        // std::endl;
+        // std::cout << "intersection size is " << size << std::endl;
+
+        // naive judgement //
+        // int size = 0;
+        // Intersection inter;
+        // Vector3f dir = Vector3f(0.001, 1., 0.001).normalized();
+        // Ray ray(pos, dir, 0.0);
+        // for (auto& oneTir : triangles)
+        // {
+        //     inter = oneTir.getIntersection(ray);
+        //     if (inter.happened) size++;
+        //     inter.happened = false;
+        // }
 
         if (size % 2 == 0)
             return false;

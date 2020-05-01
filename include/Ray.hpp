@@ -19,7 +19,7 @@ struct Ray
     double t_min, t_max;
 
     Ray(const Vector3f& ori, const Vector3f& dir, const double _t = 0.0)
-        : origin(ori), direction(dir), t(_t)
+        : origin(ori), direction(dir.normalized()), t(_t)
     {
         direction_inv = Vector3f(1. / direction.x(), 1. / direction.y(),
                                  1. / direction.z());
