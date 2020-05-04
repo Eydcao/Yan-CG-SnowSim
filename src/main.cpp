@@ -6,6 +6,7 @@
 // #include "Vector.hpp"
 // #include "global.hpp"
 // #include <chrono>
+#include "Grid.hpp"
 #include "Rectangular.hpp"
 #include "SnowParticle.hpp"
 #include "Sphere.hpp"
