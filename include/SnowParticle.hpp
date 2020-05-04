@@ -5,22 +5,72 @@
 #include <iostream>
 using namespace Eigen;
 
-struct SnowParticleMaterial
+class SnowParticleMaterial
 {
+   private:
+   public:
     // TODO add more related data inside later, give them defualt values
-    float density = 1.;
-    float youngsModule = 1.;
-    int lNumDensity = 1;
+    // TODO fig out if this will be updated or only volume needs to
+    float initialDensity = 400.;
+    // line number density when generating particles
+    // initial value 138 = 0.0072 diameter
+    int lNumDensity = 138;
+    float criticalStress = 1. - 2.5e-2;
+    float criticalStretch = 1. + 7.5e-3;
+    float hardening = 10.;
+    float youngsModule = 1.4e5;
+    float PoissonsRatio = .2;
+    // Collision stickiness (lower = stickier)
+    float sticky = .9;
+    // Lame parameters
+    float mu;
+    float lambda;
+
     // etc
+
+    SnowParticleMaterial();
+    ~SnowParticleMaterial();
 };
+
+SnowParticleMaterial::SnowParticleMaterial()
+{
+    mu = youngsModule / (2. + 2. * PoissonsRatio);
+    lambda = youngsModule * PoissonsRatio /
+             ((1. + PoissonsRatio) * (1. - 2. * PoissonsRatio));
+}
+
+SnowParticleMaterial::~SnowParticleMaterial()
+{
+}
 
 class SnowParticle
 {
    private:
    public:
+    float volume;
+    float mass;
+    // TODO fig out if this will be updated or only volume needs to
+    float density;
     Vector3f position;
     Vector3f velocity;
-    Vector3f deformationGradient;
+    Matrix3f velocityGradient;
+    Matrix3f deformationGradientElastic;
+    Matrix3f deformationGradientPlastic;
+    // Cached SVD's for elastic deformation gradient
+    Matrix3f SVDW;
+    Matrix3f SVDV;
+    Vector3f SVDE;
+    // Cached polar decomposition
+    // TODO fig out in 3d if the polar phi is also needed
+    Matrix3f polarR;
+    Matrix3f polarTheta;
+    Matrix3f polarPhi;
+    // Grid interpolation weights
+    // TODO fig out if grid position can be replaced by id or sth
+    Vector3f grid_position;
+    // TODO fig out what is the size of adj grids in 3d
+    Vector3f weight_gradient[16];
+    float weights[16];
 
     SnowParticleMaterial* m;
 
@@ -29,8 +79,7 @@ class SnowParticle
     ~SnowParticle();
 };
 
-SnowParticle::SnowParticle()
-    : position(), velocity(), deformationGradient(), m(nullptr)
+SnowParticle::SnowParticle() : m(nullptr)
 {
 }
 
