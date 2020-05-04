@@ -477,6 +477,7 @@ void makeDisplayLists()
 // Main function for snow simulation
 int main(int argc, char** argv)
 {
+#if ENABLE_TESTONTHERUN
     // tests
     {
         std::cout << "hello snow simulation tests" << std::endl;
@@ -552,11 +553,12 @@ int main(int argc, char** argv)
         std::cout << "all snow simulation tests PASSED" << std::endl;
     }
     // end tests
+#endif
 
     // snow sim
     // std::cout << "test p generation in a closed tri mesh" << std::endl;
     SnowParticleMaterial m;
-    m.lNumDensity = 100;
+    // m.lNumDensity = 100;
     MeshTriangle cow("../media/spot_triangulated_good.obj");
     // SnowParticleSet spSet;
     wholeSPSet.addParticlesInAShape(&cow, &m);

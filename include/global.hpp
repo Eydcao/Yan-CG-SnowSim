@@ -1,3 +1,6 @@
+#ifndef SIMGLOBAL
+#define SIMGLOBAL
+
 #include <cmath>
 #include <iostream>
 #include <random>
@@ -67,3 +70,8 @@ inline bool solveQuadratic(const float &a, const float &b, const float &c,
 //     std::cout << "] " << int(progress * 100.0) << " %\r";
 //     std::cout.flush();
 // };
+
+// some compile options
+#define ENABLE_TESTONTHERUN true
+
+#endif
