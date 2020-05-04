@@ -19,6 +19,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 add_executable(SnowSim
                src/main.cpp
                src/BVH.cpp
-               src/camera.cpp)
+               src/camera.cpp
+               src/SnowParticle.cpp)
 
 target_link_libraries(SnowSim ${OPENGL_LIBRARIES} ${GLUT_LIBRARY})
