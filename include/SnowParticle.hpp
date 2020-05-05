@@ -66,6 +66,17 @@ class SnowParticle
     SnowParticle();
     SnowParticle(const Vector3f& pos, SnowParticleMaterial* material);
     ~SnowParticle();
+
+    // Update position, based on velocity
+    void updatePos();
+    // Update deformation gradient
+    void updatePureElasticGradient();
+    void updateCombinedPElasticGradient();
+    // Compute stress tensor
+    const Matrix3f energyDerivative();
+
+    // Computes stress force delta, for implicit velocity update
+    const Vector3f deltaForce(const Vector2f& u, const Vector2f& weight_grad);
 };
 
 class SnowParticleSet
@@ -73,6 +84,7 @@ class SnowParticleSet
    private:
    public:
     std::vector<SnowParticle*> particles;
+    float maxVelocity;
 
     SnowParticleSet();
     ~SnowParticleSet();
@@ -84,6 +96,7 @@ class SnowParticleSet
     //                                 const SnowParticleSet& set2);
     // inline SnowParticleSet unionSet(const std::vector<SnowParticleSet>&
     // sets);
+    void update();
 };
 
 #endif  // SNOWSIM_SNOWPARTICLES

@@ -164,7 +164,7 @@ void GridMesh::calculateVolumes() const
     // }
 }
 // Calculate next timestep velocities for use in implicit integration
-void GridMesh::explicitVelocities(const Vector2f& gravity)
+void GridMesh::explicitVelocities(const Vector3f& gravity)
 {
     // First, compute the forces
     // We store force in velocity_new, since we're not using that variable at

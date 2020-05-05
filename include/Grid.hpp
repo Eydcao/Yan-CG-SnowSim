@@ -70,7 +70,7 @@ class GridMesh
     // Map grid volumes back to particles (first timestep only)
     void calculateVolumes() const;
     // Compute grid velocities
-    void explicitVelocities(const Vector2f& gravity);
+    void explicitVelocities(const Vector3f& gravity);
     // #if ENABLE_IMPLICIT
     void implicitVelocities();
     void recomputeImplicitForces();

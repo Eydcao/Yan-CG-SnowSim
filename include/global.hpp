@@ -8,6 +8,9 @@
 #undef M_PI
 #define M_PI 3.141592653589793f
 
+// deltaT can be changed
+static float deltaT = 1.e-4;
+
 static const float EPSILON = 0.001;
 static const float kInfinity = std::numeric_limits<float>::max();
 static const float FRAMERATE = 60.;
@@ -73,5 +76,6 @@ inline bool solveQuadratic(const float &a, const float &b, const float &c,
 
 // some compile options
 #define ENABLE_TESTONTHERUN true
+#define ENABLE_IMPLICIT false
 
 #endif
