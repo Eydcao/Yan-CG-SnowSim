@@ -21,6 +21,7 @@ add_executable(SnowSim
                src/BVH.cpp
                src/camera.cpp
                src/Grid.cpp
+               src/SimDomain.cpp
                src/SnowParticle.cpp)
 
 target_link_libraries(SnowSim ${OPENGL_LIBRARIES} ${GLUT_LIBRARY})
