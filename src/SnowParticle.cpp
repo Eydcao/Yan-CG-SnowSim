@@ -13,11 +13,13 @@ SnowParticleMaterial::~SnowParticleMaterial()
 
 SnowParticle::SnowParticle() : m(nullptr)
 {
+    // TODO proper constructor
 }
 
 SnowParticle::SnowParticle(const Vector3f& pos, SnowParticleMaterial* material)
     : position(pos), m(material)
 {
+    // TODO proper constructor
 }
 
 SnowParticle::~SnowParticle()

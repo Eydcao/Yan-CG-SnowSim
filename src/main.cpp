@@ -13,6 +13,7 @@
 #include "Triangle.hpp"
 #include "camera.hpp"
 #include "extra.hpp"
+#include "simDomain.hpp"
 #include <GL/glut.h>
 #include <iostream>
 
@@ -484,7 +485,7 @@ int main(int argc, char** argv)
         std::cout << "hello snow simulation tests" << std::endl;
     }
     {
-        std::cout << "test p generation in a sphere: ";
+        std::cout << "test p generation in a sphere :";
         SnowParticleMaterial m;
         m.lNumDensity = 2;
         Sphere Omega(Vector3f(0.0, 0.0, 0.0), 10.0);
@@ -522,11 +523,6 @@ int main(int argc, char** argv)
         assert(std::abs(inter.distance - 0.57735) < EPSILON);
         assert((inter.coords - Vector3f(1. / 3., 1. / 3., 1. / 3.)).norm() <
                EPSILON);
-        // std::cout << " inter happened " << inter.happened << std::endl;
-        // std::cout << " inter t " << inter.distance << std::endl;
-        // std::cout << " inter coord " << inter.coords << std::endl;
-
-        // return 0;
         std::cout << " PASSED" << std::endl;
     }
     {
@@ -538,16 +534,29 @@ int main(int argc, char** argv)
         spSet.addParticlesInAShape(&cow, &m);
         assert(std::abs(cow.getVolume() / (cow.getBounds().volume()) -
                         spSet.particles.size() / 94. / 169. / 171.) < 0.01);
-        // std::cout << " the vol ratio is "
-        //           << cow.getVolume() / (cow.getBounds().volume()) <<
-        //           std::endl;
-        // std::cout << " the size ratio is "
-        //           << spSet.particles.size() / 94. / 169. / 171. << std::endl;
-        // assert(spSet.particles.size() == 8000);
         for (auto& anyParticle : spSet.particles)
         {
             assert(anyParticle->m == &m);
         }
+        std::cout << " PASSED" << std::endl;
+    }
+    {
+        std::cout << "test construction of SPS, Grid, and SimDomain :";
+        SnowParticleMaterial m;
+        m.lNumDensity = 2;
+        Rectangular Box(Vector3f(0.0, 0.0, 0.0), Vector3f(10.0, 10.0, 10.0));
+        Sphere Omega(Vector3f(-10.0, -10.0, -10.0), 5.0);
+        SnowParticleSet SPS;
+        SPS.addParticlesInAShape(&Box, &m);
+        SPS.addParticlesInAShape(&Omega, &m);
+        Bounds3 bbox = Union(Box.getBounds(), Omega.getBounds());
+        GridMesh gridMesh(bbox, Vector3f(.5, .5, .5), &SPS);
+        SimDomain SD(&SPS, &gridMesh);
+        assert(SD.SPS == &SPS);
+        assert(SD.gridMesh == &gridMesh);
+        assert(SD.SPS->particles.size() == 11544);
+        assert(SD.gridMesh->totalCellNum == 132651);
+        assert(SD.gridMesh->eachCellVolume == 0.125);
         std::cout << " PASSED" << std::endl;
     }
     {
