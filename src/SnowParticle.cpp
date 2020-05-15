@@ -13,13 +13,44 @@ SnowParticleMaterial::~SnowParticleMaterial()
 
 SnowParticle::SnowParticle() : m(nullptr)
 {
-    // TODO proper constructor
+    // volume mass and density will be calculated initially
+    // so no need to assign now
+    volume = 0;
+    mass = 0;
+    density = 0;
+    position = Vector3f(0, 0, 0);
+    velocity = Vector3f(0, 0, 0);
+    velocityGradient = Matrix3f::Zero();
+    deformationGradientElastic = Matrix3f::Identity();
+    deformationGradientPlastic = Matrix3f::Identity();
+    SVDU = Matrix3f::Identity();
+    SVDV = Matrix3f::Identity();
+    SVDS = Vector3f(1, 1, 1);
+    polarR = Matrix3f::Identity();
+    polarTheta = Matrix3f::Identity();
+    polarPhi = Matrix3f::Identity();
 }
 
-SnowParticle::SnowParticle(const Vector3f& pos, SnowParticleMaterial* material)
-    : position(pos), m(material)
+SnowParticle::SnowParticle(const Vector3f& pos, const Vector3f& vel,
+                           const float Mass, SnowParticleMaterial* material)
+    : position(pos), velocity(vel), mass(Mass), m(material)
 {
-    // TODO proper constructor
+    // volume mass and density will be calculated initially
+    // so no need to assign now
+    volume = 0;
+    // mass = 0;
+    density = 0;
+    velocityGradient = Matrix3f::Zero();
+    deformationGradientElastic = Matrix3f::Identity();
+    deformationGradientPlastic = Matrix3f::Identity();
+    SVDU = Matrix3f::Identity();
+    SVDV = Matrix3f::Identity();
+    SVDS = Vector3f(1, 1, 1);
+    polarR = Matrix3f::Identity();
+    polarTheta = Matrix3f::Identity();
+    polarPhi = Matrix3f::Identity();
+
+    // std::cout << " sp mass is " << mass << std::endl;
 }
 
 SnowParticle::~SnowParticle()
@@ -39,74 +70,78 @@ void SnowParticle::updatePureElasticGradient()
     deformationGradientElastic =
         pureEDefGradChangeRate * deformationGradientElastic;
 }
+
 void SnowParticle::updateCombinedPElasticGradient()
 {
-    // TODO very careful about row/col
-    // TODO make sure about the row/or col major is consistent with the paper
-    // and with eigen
-
-    // consider both elastic and plastic then
-    Matrix3f f_all = deformationGradientElastic * deformationGradientPlastic;
+    // consider total deformation
+    Matrix3f deformationTot =
+        deformationGradientElastic * deformationGradientPlastic;
     // We compute the SVD decomposition
     // The singular values (basically a scale transform) tell us if
     // the particle has exceeded critical stretch/compression
 
-    // TODO find out how eigen do SVD decompesation
-    // TODO
-    // deformationGradientElastic.svd(&SVDW, &SVDE, &SVDV);
-    Matrix3f SVDV_trans = SVDV.transpose();
+    // deformationGradientElastic.svd(&SVDU, &SVDS, &SVDV);
+    JacobiSVD<Matrix3f> svd(deformationGradientElastic,
+                            ComputeFullU | ComputeFullV);
+    SVDS = svd.singularValues();
+    SVDU = svd.matrixU();
+    SVDV = svd.matrixV();
     // Clamp singular values to within elastic region
     for (int i = 0; i < 3; i++)
     {
-        // if (SVDE[i] < m->criticalStress)
-        //     SVDE[i] = m->criticalStress;
-        // else if (SVDE[i] > m->criticalStretch)
-        //     SVDE[i] = m->criticalStretch;
-
-        SVDE[i] = clamp(m->criticalStress, m->criticalStretch, SVDE[i]);
+        SVDS[i] = clamp(m->criticalStress, m->criticalStretch, SVDS[i]);
     }
 
     // TODO fig out if 3d needs polar-phi, how to compute
     // TODO
     // #if ENABLE_IMPLICIT
     // Compute polar decomposition, from clamped SVD
-    // polar_r.setData(SVDW * SVDV_trans);
+    // polar_r.setData(SVDU * SVDV_trans);
     // polar_s.setData(SVDV);
-    // polar_s.diag_product(SVDE);
+    // polar_s.diag_product(SVDS);
     // polar_s.setData(polar_s * SVDV_trans);
     // #endif
 
     // Recompute elastic and plastic gradient
-    // We're basically just putting the SVD back together again
-
-    Matrix3f vDivideSVED(SVDV), wTimeSVDE(SVDW);
-    vDivideSVED.row(0) /= SVDE[0];
-    vDivideSVED.row(1) /= SVDE[1];
-    vDivideSVED.row(2) /= SVDE[2];
-    wTimeSVDE.row(0) *= SVDE[0];
-    wTimeSVDE.row(1) *= SVDE[1];
-    wTimeSVDE.row(2) *= SVDE[2];
-    // v_cpy.diag_product_inv(SVDE);
-    // w_cpy.diag_product(SVDE);
-    deformationGradientPlastic = vDivideSVED * SVDW.transpose() * f_all;
-    deformationGradientElastic = wTimeSVDE * SVDV.transpose();
+    Matrix3f VDivideSVDS(SVDV), UTimeSVDS(SVDU);
+    VDivideSVDS.col(0) /= SVDS[0];
+    VDivideSVDS.col(1) /= SVDS[1];
+    VDivideSVDS.col(2) /= SVDS[2];
+    UTimeSVDS.col(0) *= SVDS[0];
+    UTimeSVDS.col(1) *= SVDS[1];
+    UTimeSVDS.col(2) *= SVDS[2];
+    deformationGradientPlastic =
+        VDivideSVDS * SVDU.transpose() * deformationTot;
+    deformationGradientElastic = UTimeSVDS * SVDV.transpose();
 }
+
 const Matrix3f SnowParticle::energyDerivative()
 {
     // Adjust lame parameters to account for m->hardening
     float harden =
         exp(m->hardening * (1. - deformationGradientPlastic.determinant()));
-    float Je = SVDE.x() * SVDE.y() * SVDE.z();
+    float Je = SVDS.x() * SVDS.y() * SVDS.z();
     // This is the co-rotational term
     Matrix3f temp = 2. * m->mu *
-                    (deformationGradientElastic - SVDW * SVDV.transpose()) *
+                    (deformationGradientElastic - SVDU * SVDV.transpose()) *
                     deformationGradientElastic.transpose();
     // Add in the primary contour term
     temp += m->lambda * Je * (Je - 1.) * Matrix3f::Identity();
-    // temp.diag_sum(m->lambda * Je * (Je - 1));
+    // if (std::abs(harden - 1.) > 1e-5)
+    // {
+    //     std::cout << " harden is" << harden << std::endl;
+    // }
+    // if (std::abs(Je - 1.) > 1e-5)
+    // {
+    //     std::cout << " Je is" << Je << std::endl;
+    // }
+    // std::cout << " vol is" << volume << std::endl;
+    // std::cout << " lamda is" << m->lambda << std::endl;
+    // std::cout << " mu is" << m->mu << std::endl;
     // Add m->hardening and volume
     return volume * harden * temp;
 }
+
 // #if ENABLE_IMPLICITF
 const Vector3f SnowParticle::deltaForce(const Vector2f& u,
                                         const Vector2f& weight_grad)
@@ -208,22 +243,81 @@ void SnowParticleSet::addParticle(SnowParticle* sp)
     particles.push_back(sp);
 }
 
-void SnowParticleSet::addParticle(const Vector3f& pos, SnowParticleMaterial* m)
+void SnowParticleSet::addParticle(const Vector3f& pos, const Vector3f& vel,
+                                  const float Mass, SnowParticleMaterial* m)
 {
-    SnowParticle* sp = new SnowParticle(pos, m);
+    // std::cout << " sp mass is " << Mass << std::endl;
+    SnowParticle* sp = new SnowParticle(pos, vel, Mass, m);
     particles.push_back(sp);
 }
 
-void SnowParticleSet::addParticlesInAShape(Shape* s, SnowParticleMaterial* m)
+void SnowParticleSet::addParticlesInAShape(Shape* s, const Vector3f& vel,
+                                           SnowParticleMaterial* m)
 {
     std::vector<Vector3f> tempPos;
     int temp = s->generateParticlesInside(m->lNumDensity, tempPos);
     // std::cout << " size is " << temp << std::endl;
     if (temp > 0)
     {
+        float totMass = s->getVolume() * m->initialDensity;
+        float massPerP = totMass / (float)temp;
+        // std::cout << " totMass is " << totMass << std::endl;
+        // std::cout << " massPerP is " << massPerP << std::endl;
+
         for (const auto& onePos : tempPos)
         {
-            addParticle(onePos, m);
+            addParticle(onePos, vel, massPerP, m);
+        }
+    }
+}
+
+void SnowParticleSet::appendSet(SnowParticleSet& anotherSet)
+{
+    for (SnowParticle* p : anotherSet.particles)
+    {
+        particles.push_back(p);
+    }
+    anotherSet.particles.clear();
+    // the other set will be cleared in the end
+    // this is to avoid deleting particle* error when the latter is destroyed
+}
+
+void SnowParticleSet::CreateMirror(const SnowParticleSet& anotherSet, float a,
+                                   float b, float c, float d, const Vector3f p)
+{
+    for (SnowParticle* sp : anotherSet.particles)
+    {
+        Vector3f pos = sp->position;
+        Vector3f vel = sp->velocity;
+        Vector3f relPos = p - pos;
+        Vector3f relPosNormalToPlane =
+            relPos.dot(Vector3f(a, b, c)) * Vector3f(a, b, c);
+        Vector3f newPos = 2. * relPosNormalToPlane + pos;
+
+        Vector3f relVelTOPlane = vel.dot(Vector3f(a, b, c)) * Vector3f(a, b, c);
+        Vector3f relVelTangent = vel - relVelTOPlane;
+        Vector3f newVel = relVelTangent - relVelTOPlane;
+
+        addParticle(newPos, newVel, sp->mass, sp->m);
+    }
+}
+
+void SnowParticleSet::addParticlesInAShape(Shape* s, SnowParticleMaterial* m)
+{
+    std::vector<Vector3f> tempPos;
+    Vector3f vel(0, 0, 0);
+    int temp = s->generateParticlesInside(m->lNumDensity, tempPos);
+    // std::cout << " size is " << temp << std::endl;
+    if (temp > 0)
+    {
+        float totMass = s->getVolume() * m->initialDensity;
+        float massPerP = totMass / (float)temp;
+        // std::cout << " totMass is " << totMass << std::endl;
+        // std::cout << " massPerP is " << massPerP << std::endl;
+
+        for (const auto& onePos : tempPos)
+        {
+            addParticle(onePos, vel, massPerP, m);
         }
     }
 }

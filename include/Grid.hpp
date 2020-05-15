@@ -15,10 +15,19 @@ class SnowParticleMaterial;
 class SnowParticle;
 class SnowParticleSet;
 
-struct GridCell
+class GridCell
 {
+   private:
+   public:
+    GridCell();
+    ~GridCell();
+
+    void resetCell();
+
     // if cell has snow particle, then active
     bool active;
+    // index in the mesh
+    int i, j, k;
     float mass;
     Vector3f velocity;
     // star is super script, meaning temp or intermedia velocity, under explicit
@@ -26,8 +35,12 @@ struct GridCell
     Vector3f velocityStar;
 
     // the following pars are only used in implicit mode
-    bool implicitSolve;
+    // bool implicitSolve;
     Vector3f force;
+
+    std::vector<SnowParticle*> affectedParticles;
+    std::vector<int> affectedParticlesWeightID;
+
     Vector3f error;
     Vector3f residual;
     // TODO fig out what is p, gradient of resiudal or error?
@@ -46,6 +59,7 @@ class GridMesh
     // Vector3f origin;
     // Vector3f size;
     Bounds3 bbox;
+    Bounds3 SPSbbox;
     // Vector3f cellsize;
     // how many cells in x, y, and z direction
     Vector3i cellNum;
@@ -56,6 +70,8 @@ class GridMesh
     // (e.g. like a cartesian grid)
     int totalCellNum;
     std::vector<GridCell*> cells;
+    int totalEffectiveCellNum;
+    std::vector<GridCell*> effectiveCells;
 
     // Grid be at least one cell; there must be one layer of cells surrounding
     // all particles
@@ -65,24 +81,25 @@ class GridMesh
     ~GridMesh();
 
     // Map particles to grid
-    void initializeMass();
-    void initializeVelocities();
+    void initializeGridMeshActiveMassAndMomentum();
+    void updateVelocityInGrids(const Vector3f& gravity);
+    // void initializeGridVelocity();
+    // void updateGridVelocityStar(const Vector3f& gravity);
+    // void gridCollisionTest();
     // Map grid volumes back to particles (first timestep only)
-    void calculateVolumes() const;
+    void calculateParticleVolume() const;
     // Compute grid velocities
-    void explicitVelocities(const Vector3f& gravity);
+
     // #if ENABLE_IMPLICIT
-    void implicitVelocities();
+    void implicitUpdateGridVelocity();
     void recomputeImplicitForces();
     // #endif
     // Map grid velocities back to particles
-    void updateVelocities() const;
+    void mapVelocityToSPS() const;
 
     // Collision detection
-    void collisionGrid();
-    void collisionParticles() const;
+    // void particleCollisionTest() const;
 
-    // TODO change the corresponding spline curve in 3D
     // Cubic B-spline shape/basis/interpolation function
     // A smooth curve from (0,1) to (1,0)
     static float bspline(float x)

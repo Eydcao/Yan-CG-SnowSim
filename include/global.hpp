@@ -16,7 +16,7 @@ static const float kInfinity = std::numeric_limits<float>::max();
 static const float FRAMERATE = 60.;
 // Adaptive timestep adjustment
 static const float CFL = .04;
-static const float MAX_TIMESTEP = 5.e-4;
+static const float MAX_TIMESTEP = 5.e-5;
 // Percentage that FLIP TAKES, PIC is 1 - that
 static const float FLIP_PERCENT = .95;
 // Percentage that should be implicit vs explicit

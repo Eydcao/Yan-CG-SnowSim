@@ -9,8 +9,6 @@ class SnowParticleMaterial
 {
    private:
    public:
-    // TODO add more related data inside later, give them defualt values
-    // TODO fig out if this will be updated or only volume needs to
     float initialDensity = 400.;
     // line number density when generating particles
     // initial value 138 = 0.0072 diameter
@@ -38,7 +36,7 @@ class SnowParticle
    public:
     float volume;
     float mass;
-    // TODO fig out if this will be updated or only volume needs to
+    // this density can be updated for the viewing purposes
     float density;
     Vector3f position;
     Vector3f velocity;
@@ -46,9 +44,9 @@ class SnowParticle
     Matrix3f deformationGradientElastic;
     Matrix3f deformationGradientPlastic;
     // Cached SVD's for elastic deformation gradient
-    Matrix3f SVDW;
+    Matrix3f SVDU;
     Matrix3f SVDV;
-    Vector3f SVDE;
+    Vector3f SVDS;
     // Cached polar decomposition
     // TODO fig out in 3d if the polar phi is also needed
     Matrix3f polarR;
@@ -56,15 +54,16 @@ class SnowParticle
     Matrix3f polarPhi;
     // Grid interpolation weights
     // TODO fig out if grid position can be replaced by id or sth
-    Vector3f grid_position;
-    // TODO fig out what is the size of adj grids in 3d
-    Vector3f weight_gradient[16];
-    float weights[16];
+    // Vector3f grid_position;
+    // [-1,3) (4)^3=64, so at most 64 adj nonzero weights
+    Vector3f weight_gradient[64];
+    float weights[64];
 
     SnowParticleMaterial* m;
 
     SnowParticle();
-    SnowParticle(const Vector3f& pos, SnowParticleMaterial* material);
+    SnowParticle(const Vector3f& pos, const Vector3f& vel, const float mass,
+                 SnowParticleMaterial* material);
     ~SnowParticle();
 
     // Update position, based on velocity
@@ -89,9 +88,15 @@ class SnowParticleSet
     SnowParticleSet();
     ~SnowParticleSet();
     void addParticle(SnowParticle* sp);
-    void addParticle(const Vector3f& pos, SnowParticleMaterial* m);
+    void addParticle(const Vector3f& pos, const Vector3f& vel, const float Mass,
+                     SnowParticleMaterial* m);
+    // TODO can consider initial rotation in a snow shape
     void addParticlesInAShape(Shape* s, SnowParticleMaterial* m);
-    // void appendSet(const SnowParticleSet& anotherSet);
+    void addParticlesInAShape(Shape* s, const Vector3f& vel,
+                              SnowParticleMaterial* m);
+    void appendSet(SnowParticleSet& anotherSet);
+    void CreateMirror(const SnowParticleSet& anotherSet, float a, float b,
+                      float c, float d, const Vector3f p);
     // inline SnowParticleSet unionSet(const SnowParticleSet& set1,
     //                                 const SnowParticleSet& set2);
     // inline SnowParticleSet unionSet(const std::vector<SnowParticleSet>&

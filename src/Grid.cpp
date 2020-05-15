@@ -1,5 +1,47 @@
 #include "Grid.hpp"
 
+GridCell::GridCell()
+{
+    active = false;
+    // the mass will be mapped from adj pars each time of simulation
+    mass = 0;
+    velocity.setZero();
+    velocityStar.setZero();
+    force.setZero();
+    affectedParticles = {};
+    affectedParticlesWeightID = {};
+
+    error.setZero();
+    residual.setZero();
+    p.setZero();
+    Ep.setZero();
+    Er.setZero();
+    rEr = 0;
+}
+
+GridCell::~GridCell()
+{
+}
+
+void GridCell::resetCell()
+{
+    active = false;
+    // the mass will be mapped from adj pars each time of simulation
+    mass = 0;
+    velocity.setZero();
+    velocityStar.setZero();
+    force.setZero();
+    affectedParticles = {};
+    affectedParticlesWeightID = {};
+
+    error.setZero();
+    residual.setZero();
+    p.setZero();
+    Ep.setZero();
+    Er.setZero();
+    rEr = 0;
+}
+
 GridMesh::GridMesh(const Bounds3& bbox, const Vector3f& cellSize,
                    SnowParticleSet* SPS)
 {
@@ -33,11 +75,17 @@ GridMesh::GridMesh(const Bounds3& bbox, const Vector3f& cellSize,
             {
                 // why write 3 loops instead of one
                 // just in case sth related to xyz dimension will be calculated
-                GridCell* tempCell = new GridCell;
-                cells[i * numx * numy + j * numy + k] = tempCell;
+                GridCell* tempCell = new GridCell();
+                tempCell->i = i;
+                tempCell->j = j;
+                tempCell->k = k;
+                cells[i * numy * numz + j * numz + k] = tempCell;
             }
         }
     }
+    // now we dont know how many cells effective yet
+    totalEffectiveCellNum = 0;
+    effectiveCells = {};
 }
 
 GridMesh::~GridMesh()
@@ -50,394 +98,884 @@ GridMesh::~GridMesh()
 }
 
 // Maps mass and velocity to the grid
-void GridMesh::initializeMass()
+void GridMesh::initializeGridMeshActiveMassAndMomentum()
 {
-    // TODO write a proper initial constructor for gridCell
+    // this loop will reset the old EFFECTIVE cell; TODO trivial parfor
+    for (int iCell = 0; iCell < totalEffectiveCellNum; iCell++)
+    {
+        GridCell* cell = effectiveCells[iCell];
+        cell->resetCell();
+    }
+    effectiveCells.clear();
 
-    // Reset the grid
-    // If the grid is sparsely filled, it may be better to reset individual
-    // nodes Also, not all these variables need to be zeroed, so... yeah
-    // memset(nodes, 0, sizeof(GridNode) * nodes_length);
+    // reset SPSbbox
+    SPSbbox = Bounds3(SPS->particles[0]->position);
 
-    // TODO
-    // Map particle data to grid
-    // for (int i = 0; i < obj->size; i++)
-    // {
-    //     Particle& p = obj->particles[i];
-    //     // Particle position to grid coordinates
-    //     // This will give errors if the particle is outside the grid bounds
-    //     p.grid_position = (p.position - origin) / cellsize;
-    //     float ox = p.grid_position[0], oy = p.grid_position[1];
+    // This initial mapping has to serial loop with particles
+    // after this is done create a 'effective cells'
+    // this is for the sake of parfor efficiency later (avoid uneffective cells)
 
-    //     // Shape function gives a blending radius of two;
-    //     // so we do computations within a 2x2 square for each particle
-    //     for (int idx = 0, y = oy - 1, y_end = y + 3; y <= y_end; y++)
-    //     {
-    //         // Y-dimension interpolation
-    //         float y_pos = oy - y, wy = GridMesh::bspline(y_pos),
-    //               dy = GridMesh::bsplineSlope(y_pos);
+    float& maxVelocity = SPS->maxVelocity;
+    maxVelocity = 0;
+    for (int i = 0; i < SPS->particles.size(); i++)
+    {
+        SnowParticle* p = SPS->particles[i];
+        // Solve for grid internal forces
+        // Matrix3f energyD = p->energyDerivative();
+        Vector3f pos = p->position;
+        // greedy to get the max vel
+        Vector3f vel = p->velocity;
+        float v = vel.norm();
+        if (v > maxVelocity) maxVelocity = v;
+        SPSbbox = Union(SPSbbox, pos);
+        Vector3f posRel =
+            (pos - bbox.pMin).cwiseProduct(cellSize.cwiseInverse());
+        for (int countForAdjGrid = 0, ipx = (int)posRel.x() - 1;
+             ipx < (int)posRel.x() + 3; ipx++)
+        {
+            for (int ipy = (int)posRel.y() - 1; ipy < (int)posRel.y() + 3;
+                 ipy++)
+            {
+                for (int ipz = (int)posRel.z() - 1; ipz < (int)posRel.z() + 3;
+                     ipz++)
+                {
+                    // see if it is inside the bbox
+                    // no: this weight and weight grad is 0, nothing else
+                    // yes: can calculate the weights and weight grads
+                    //      then push back this p and the count to corresponding
+                    //      cell for record; mark that cell to active; addup
+                    //      cell's mass
+                    if (ipx >= 0 && ipy >= 0 && ipz >= 0 && ipx < cellNum.x() &&
+                        ipy < cellNum.y() && ipz < cellNum.z())
+                    {
+                        // get the cell
+                        int iCell = ipx * cellNum.y() * cellNum.z() +
+                                    ipy * cellNum.z() + ipz;
+                        GridCell* cell = cells[iCell];
+                        // hat means this is non dimensional
+                        float xHat = (float)ipx - posRel.x();
+                        float yHat = (float)ipy - posRel.y();
+                        float zHat = (float)ipz - posRel.z();
+                        float wx = bspline(xHat);
+                        float wy = bspline(yHat);
+                        float wz = bspline(zHat);
+                        float w = wx * wy * wz;
+                        if (w > BSPLINE_EPSILON)
+                        {
+                            // get grad by chain's rule (NOTICE that xyz hat is
+                            // dimensional)
+                            Vector3f wGrad(
+                                wy * wz * bsplineSlope(xHat) / cellSize.x(),
+                                wz * wx * bsplineSlope(yHat) / cellSize.y(),
+                                wx * wy * bsplineSlope(zHat) / cellSize.z());
+                            p->weights[countForAdjGrid] = w;
+                            p->weight_gradient[countForAdjGrid] = wGrad;
+                            // push to cell
+                            cell->affectedParticles.push_back(p);
+                            cell->affectedParticlesWeightID.push_back(
+                                countForAdjGrid);
+                            // this cell is active now
+                            cell->active = true;
+                            // add mass contribution
+                            cell->mass += w * p->mass;
+                            // add momentum contribution into velocity
+                            // later devide by mass then get velocity
+                            cell->velocity += w * p->mass * p->velocity;
+                            // if (ipx == 25 && ipy == 1 && ipz == 30)
+                            // {
+                            //     std::cout << " w is " << w << std::endl;
+                            //     std::cout << " wx is " << wx << std::endl;
+                            //     std::cout << " wy is " << wy << std::endl;
+                            //     std::cout << " wz is " << wz << std::endl;
+                            //     std::cout << " p mass " << p->mass <<
+                            //     std::endl; std::cout << " p vel " <<
+                            //     p->velocity
+                            //               << std::endl;
+                            //     std::cout << " cell id is " << cell->i << ",
+                            //     "
+                            //               << cell->j << ", " << cell->k
+                            //               << std::endl;
+                            // }
+                        }
+                        else
+                        {
+                            p->weights[countForAdjGrid] = 0;
+                            p->weight_gradient[countForAdjGrid].setZero();
+                        }
+                    }
+                    else
+                    {
+                        p->weights[countForAdjGrid] = 0;
+                        p->weight_gradient[countForAdjGrid].setZero();
+                    }
+                    // do it or not, it has goto next cell
+                    countForAdjGrid++;
+                }
+            }
+        }
+    }
 
-    //         for (int x = ox - 1, x_end = x + 3; x <= x_end; x++, idx++)
-    //         {
-    //             // X-dimension interpolation
-    //             float x_pos = ox - x, wx = GridMesh::bspline(x_pos),
-    //                   dx = GridMesh::bsplineSlope(x_pos);
+    // std::cout << " the SPS bbox Pmin is " << SPSbbox.pMin.x() << ", "
+    //           << SPSbbox.pMin.y() << ", " << SPSbbox.pMin.z() << std::endl;
+    // std::cout << " the SPS bbox Pmax is " << SPSbbox.pMax.x() << ", "
+    //           << SPSbbox.pMax.y() << ", " << SPSbbox.pMax.z() << std::endl;
 
-    //             // Final weight is dyadic product of weights in each
-    //             dimension float weight = wx * wy; p.weights[idx] = weight;
-
-    //             // Weight gradient is a vector of partial derivatives
-    //             p.weight_gradient[idx].setData(dx * wy, wx * dy);
-    //             // I don't know why we need to do this... JT did it, doesn't
-    //             // appear in tech paper
-    //             p.weight_gradient[idx] /= cellsize;
-
-    //             // Interpolate mass
-    //             nodes[(int)(y * size[0] + x)].mass += weight * p.mass;
-    //         }
-    //     }
-    // }
+    // then fill the new EFFECTIVE cells
+    for (int iCell = 0; iCell < totalCellNum; iCell++)
+    {
+        GridCell* cell = cells[iCell];
+        if (cell->active) effectiveCells.push_back(cell);
+    }
+    totalEffectiveCellNum = effectiveCells.size();
 }
-void GridMesh::initializeVelocities()
+
+void GridMesh::updateVelocityInGrids(const Vector3f& gravity)
 {
-    // TODO do read carefully in the paper how momentum is conserved
-    // using which weight
-    // TODO
-    // We interpolate velocity after mass, to conserve momentum
-    // for (int i = 0; i < obj->size; i++)
-    // {
-    //     Particle& p = obj->particles[i];
-    //     int ox = p.grid_position[0], oy = p.grid_position[1];
-    //     for (int idx = 0, y = oy - 1, y_end = y + 3; y <= y_end; y++)
-    //     {
-    //         for (int x = ox - 1, x_end = x + 3; x <= x_end; x++, idx++)
-    //         {
-    //             float w = p.weights[idx];
-    //             if (w > BSPLINE_EPSILON)
-    //             {
-    //                 // Interpolate velocity
-    //                 int n = (int)(y * size[0] + x);
-    //                 // We could also do a separate loop to divide by
-    //                 // nodes[n].mass only once
-    //                 nodes[n].velocity += p.velocity * w * p.mass;
-    //                 nodes[n].active = true;
-    //             }
-    //         }
-    //     }
-    // }
-    // for (int i = 0; i < nodes_length; i++)
-    // {
-    //     GridNode& node = nodes[i];
-    //     if (node.active) node.velocity /= node.mass;
-    // }
-    collisionGrid();
+#pragma omp parallel for
+    for (int iCell = 0; iCell < totalEffectiveCellNum; iCell++)
+    {
+        // get vel
+        {
+            GridCell* cell = effectiveCells[iCell];
+            cell->velocity /= cell->mass;
+            // test
+            // if (isnan(cell->velocity.norm()))
+            // {
+            //     std::cout << " cell velocity old is " << cell->velocity
+            //               << std::endl;
+            //     std::cout << " cell mass " << cell->mass << std::endl;
+            //     std::cout << " cell id is " << cell->i << ", " << cell->j <<
+            //     ", "
+            //               << cell->k << std::endl;
+            //     exit(0);
+            // }
+        }
+        // get vel star
+        {
+            // First, compute the forces
+            GridCell* cell = effectiveCells[iCell];
+            Vector3f force = Vector3f::Zero();
+            for (int i = 0; i < cell->affectedParticles.size(); i++)
+            {
+                SnowParticle* p = cell->affectedParticles[i];
+                int countForAdjGrid = cell->affectedParticlesWeightID[i];
+                float w = p->weights[countForAdjGrid];
+                Vector3f wGrad = p->weight_gradient[countForAdjGrid];
+                Matrix3f energyD = p->energyDerivative();
+                if (w > BSPLINE_EPSILON)
+                {
+                    force += energyD * wGrad;
+                    // std::cout << " force + energyD is " << energyD <<
+                    // std::endl; std::cout << " force + wGrad is " << wGrad <<
+                    // std::endl;
+                }
+            }
+            // std::cout << " force is " << force << std::endl;
+            // std::cout << " g is " << gravity << std::endl;
+            // std::cout << " mass is " << cell->mass << std::endl;
+            // force+gravity->a->dv->vStar
+            cell->velocityStar =
+                cell->velocity + deltaT * (gravity - force / cell->mass);
+
+            // if (isnan(cell->velocityStar.norm()))
+            // {
+            //     std::cout << " cell velocity star is " << cell->velocityStar
+            //               << std::endl;
+            //     std::cout << " cell velocity old is " << cell->velocity
+            //               << std::endl;
+            //     std::cout << " cell velocity mass " << cell->mass <<
+            //     std::endl; std::cout << " cell id is " << cell->i << ", " <<
+            //     cell->j << ", "
+            //               << cell->k << std::endl;
+            //     exit(0);
+            // }
+            // if (cell->i == 0 && cell->j == 0 && cell->k == 16)
+            // {
+            //     std::cout << " cell velocity star is " << cell->velocityStar
+            //               << std::endl;
+            //     std::cout << " cell velocity old is " << cell->velocity
+            //               << std::endl;
+            //     std::cout << " cell velocity mass " << cell->mass <<
+            //     std::endl; std::cout << " cell id is " << cell->i << ", " <<
+            //     cell->j << ", "
+            //               << cell->k << std::endl;
+            //     // exit(0);
+            // }
+        }
+        // todo consider implicit
+
+        // collision test
+        {
+            // int i = iCell / (cellNum.y() * cellNum.z());
+            // int j = (iCell % (cellNum.y() * cellNum.z())) / cellNum.z();
+            // int k = iCell % cellNum.z();
+
+            // int iCell = i * cellNum.y() * cellNum.z() + j * cellNum.z() + k;
+            GridCell* cell = cells[iCell];
+            int i = cell->i;
+            int j = cell->j;
+            int k = cell->k;
+            // collision test
+            Vector3f oldCellPos((i + 0.5) * cellSize.x(),
+                                (j + 0.5) * cellSize.y(),
+                                (k + 0.5) * cellSize.z());
+            Vector3f tempPos = oldCellPos + deltaT * cell->velocityStar;
+            // TODO consider wrap this fixing vel as a function
+            // x dir
+            if (tempPos.x() > bbox.pMax.x() || tempPos.x() < bbox.pMin.x())
+            {
+                Vector3f VSolid(0, 0, 0);
+                Vector3f VRel = cell->velocityStar - VSolid;
+                Vector3f Vn = Vector3f(VRel.x(), 0, 0);
+                Vector3f Vt = Vector3f(0, VRel.y(), VRel.z());
+                float vn = Vn.norm();
+                float vt = Vt.norm();
+                // TODO this mu calculation should be cleverer
+                float mu = SPS->particles[0]->m->sticky;
+                if (vt < mu * vn || vt < 1.e-12)
+                {
+                    VRel.setZero();
+                }
+                else
+                {
+                    VRel = (1. - mu * vn / vt) * Vt;
+                }
+                cell->velocityStar = VRel + VSolid;
+                // std::cout << " cell velocity star is " << cell->velocityStar
+                //           << std::endl;
+            }
+            // y dir
+            if (tempPos.y() > bbox.pMax.y() || tempPos.y() < bbox.pMin.y())
+            {
+                Vector3f VSolid(0, 0, 0);
+                Vector3f VRel = cell->velocityStar - VSolid;
+                Vector3f Vn = Vector3f(0, VRel.y(), 0);
+                Vector3f Vt = Vector3f(VRel.x(), 0, VRel.z());
+                float vn = Vn.norm();
+                float vt = Vt.norm();
+                // TODO this mu calculation should be cleverer
+                float mu = SPS->particles[0]->m->sticky;
+                if (vt < mu * vn || vt < 1.e-12)
+                {
+                    VRel.setZero();
+                }
+                else
+                {
+                    VRel = (1. - mu * vn / vt) * Vt;
+                }
+                cell->velocityStar = VRel + VSolid;
+                // std::cout << " cell velocity star is " << cell->velocityStar
+                //           << std::endl;
+            }
+            // z dir
+            if (tempPos.z() > bbox.pMax.z() || tempPos.z() < bbox.pMin.z())
+            {
+                Vector3f VSolid(0, 0, 0);
+                Vector3f VRel = cell->velocityStar - VSolid;
+                Vector3f Vn = Vector3f(0, 0, VRel.z());
+                Vector3f Vt = Vector3f(VRel.x(), VRel.y(), 0);
+                float vn = Vn.norm();
+                float vt = Vt.norm();
+                // TODO this mu calculation should be cleverer
+                float mu = SPS->particles[0]->m->sticky;
+                if (vt < mu * vn || vt < 1.e-12)
+                {
+                    VRel.setZero();
+                }
+                else
+                {
+                    VRel = (1. - mu * vn / vt) * Vt;
+                }
+                cell->velocityStar = VRel + VSolid;
+                // std::cout << " cell velocity star is " << cell->velocityStar
+                //           << std::endl;
+            }
+            // TODO there are more collisions
+            // Finish collision test
+
+            // if (isnan(cell->velocityStar.norm()))
+            // {
+            //     std::cout << " cell velocity star is " << cell->velocityStar
+            //               << std::endl;
+            //     std::cout << " cell velocity old is " << cell->velocity
+            //               << std::endl;
+            //     std::cout << " cell velocity mass " << cell->mass <<
+            //     std::endl; std::cout << " cell id is " << cell->i << ", " <<
+            //     cell->j << ", "
+            //               << cell->k << std::endl;
+            //     exit(0);
+            // }
+        }
+    }
 }
+
+// void GridMesh::initializeGridVelocity()
+// {
+//     // TODO trivial parfor
+//     for (int iCell = 0; iCell < totalEffectiveCellNum; iCell++)
+//     {
+//         GridCell* cell = effectiveCells[iCell];
+//         cell->velocity /= cell->mass;
+//         // test
+//         // if (isnan(cell->velocity.norm()))
+//         // {
+//         //     std::cout << " cell velocity old is " << cell->velocity
+//         //               << std::endl;
+//         //     std::cout << " cell mass " << cell->mass << std::endl;
+//         //     std::cout << " cell id is " << cell->i << ", " << cell->j <<
+//         ", "
+//         //               << cell->k << std::endl;
+//         //     exit(0);
+//         // }
+//     }
+// }
+
 // Maps volume from the grid to particles
 // This should only be called once, at the beginning of the simulation
-void GridMesh::calculateVolumes() const
+void GridMesh::calculateParticleVolume() const
 {
-    // TODO fig out if both volume and sp density should be reset
-    // TODO
-
-    // Estimate each particles volume (for force calculations)
-    // for (int i = 0; i < obj->size; i++)
-    // {
-    //     Particle& p = obj->particles[i];
-    //     int ox = p.grid_position[0], oy = p.grid_position[1];
-    //     // First compute particle density
-    //     p.density = 0;
-    //     for (int idx = 0, y = oy - 1, y_end = y + 3; y <= y_end; y++)
-    //     {
-    //         for (int x = ox - 1, x_end = x + 3; x <= x_end; x++, idx++)
-    //         {
-    //             float w = p.weights[idx];
-    //             if (w > BSPLINE_EPSILON)
-    //             {
-    //                 // Node density is trivial
-    //                 p.density += w * nodes[(int)(y * size[0] + x)].mass;
-    //             }
-    //         }
-    //     }
-    //     p.density /= node_area;
-    //     // Volume for each particle can be found from density
-    //     p.volume = p.mass / p.density;
-    // }
+    // Volume is calculated once and stored
+    // density, however, will update each time for viewing purposes
+    // NB YADI : seems that for viewing purpose it only needs density
+    //           so vol still only updates once
+    for (int i = 0; i < SPS->particles.size(); i++)
+    {
+        SnowParticle* p = SPS->particles[i];
+        // Solve for grid internal forces
+        // Matrix3f energyD = p->energyDerivative();
+        Vector3f pos = p->position - bbox.pMin;
+        p->density = 0;
+        // temp sum the mass in p density
+        for (int countForAdjGrid = 0, px = (int)(pos.x() / cellSize.x()),
+                 ipx = px - 1, pxEnd = px + 3;
+             ipx < pxEnd; ipx++)
+        {
+            if (ipx >= 0 && ipx < cellNum.x())
+            {
+                for (int py = (int)(pos.y() / cellSize.y()), ipy = py - 1,
+                         pyEnd = py + 3;
+                     ipy < pyEnd; ipy++)
+                {
+                    if (ipy >= 0 && ipy < cellNum.y())
+                    {
+                        for (int pz = (int)(pos.z() / cellSize.z()),
+                                 ipz = pz - 1, pzEnd = pz + 3;
+                             ipz < pzEnd; ipz++)
+                        {
+                            if (ipz >= 0 && ipz < cellNum.z())
+                            {
+                                float w = p->weights[countForAdjGrid];
+                                if (w > BSPLINE_EPSILON)
+                                {
+                                    int iCell =
+                                        ipx * cellNum.y() * cellNum.z() +
+                                        ipy * cellNum.z() + ipz;
+                                    p->density += w * cells[iCell]->mass;
+                                    // std::cout << " here " << std::endl;
+                                }
+                            }
+                            // do it or not, it has goto next cell
+                            countForAdjGrid++;
+                        }
+                    }
+                    else
+                    {
+                        // do nothing and skip this z edge
+                        countForAdjGrid += 4;
+                    }
+                }
+            }
+            else
+            {
+                // do nothing and skip this yz face
+                countForAdjGrid += 16;
+            }
+        }
+        p->density /= eachCellVolume;
+        p->volume = p->mass / p->density;
+        // std::cout << " rho is" << p->density << std::endl;
+        // std::cout << " vol is" << p->volume << std::endl;
+    }
 }
-// Calculate next timestep velocities for use in implicit integration
-void GridMesh::explicitVelocities(const Vector3f& gravity)
-{
-    // First, compute the forces
-    // We store force in velocity_new, since we're not using that variable at
-    // the moment
-    // Yadi : donot use this dirty hack, just create a force member TODO
-    // for (int i = 0; i < obj->size; i++)
-    // {
-    //     Particle& p = obj->particles[i];
-    //     // Solve for grid internal forces
-    //     Matrix2f energy = p.energyDerivative();
-    //     int ox = p.grid_position[0], oy = p.grid_position[1];
-    //     for (int idx = 0, y = oy - 1, y_end = y + 3; y <= y_end; y++)
-    //     {
-    //         for (int x = ox - 1, x_end = x + 3; x <= x_end; x++, idx++)
-    //         {
-    //             float w = p.weights[idx];
-    //             if (w > BSPLINE_EPSILON)
-    //             {
-    //                 // Weight the force onto nodes
-    //                 int n = (int)(y * size[0] + x);
-    //                 nodes[n].velocity_new += energy * p.weight_gradient[idx];
-    //             }
-    //         }
-    //     }
-    // }
 
-    // // Now we have all grid forces, compute velocities (euler integration)
-    // for (int i = 0; i < nodes_length; i++)
-    // {
-    //     GridNode& node = nodes[i];
-    //     if (node.active)
-    //         node.velocity_new =
-    //             node.velocity +
-    //             TIMESTEP * (gravity - node.velocity_new / node.mass);
-    // }
-    collisionGrid();
-}
+// // Calculate next timestep velocities using pure explicit method
+// void GridMesh::updateGridVelocityStar(const Vector3f& gravity)
+// {
+//     // TODO trivial parfor
+//     for (int iCell = 0; iCell < totalEffectiveCellNum; iCell++)
+//     {
+//         // First, compute the forces
+//         GridCell* cell = effectiveCells[iCell];
+//         Vector3f force = Vector3f::Zero();
+//         for (int i = 0; i < cell->affectedParticles.size(); i++)
+//         {
+//             SnowParticle* p = cell->affectedParticles[i];
+//             int countForAdjGrid = cell->affectedParticlesWeightID[i];
+//             float w = p->weights[countForAdjGrid];
+//             Vector3f wGrad = p->weight_gradient[countForAdjGrid];
+//             Matrix3f energyD = p->energyDerivative();
+//             if (w > BSPLINE_EPSILON)
+//             {
+//                 force += energyD * wGrad;
+//                 // std::cout << " force + energyD is " << energyD <<
+//                 std::endl;
+//                 // std::cout << " force + wGrad is " << wGrad << std::endl;
+//             }
+//         }
+//         // std::cout << " force is " << force << std::endl;
+//         // std::cout << " g is " << gravity << std::endl;
+//         // std::cout << " mass is " << cell->mass << std::endl;
+//         // force+gravity->a->dv->vStar
+//         cell->velocityStar =
+//             cell->velocity + deltaT * (gravity - force / cell->mass);
+
+//         // if (isnan(cell->velocityStar.norm()))
+//         // {
+//         //     std::cout << " cell velocity star is " << cell->velocityStar
+//         //               << std::endl;
+//         //     std::cout << " cell velocity old is " << cell->velocity
+//         //               << std::endl;
+//         //     std::cout << " cell velocity mass " << cell->mass <<
+//         std::endl;
+//         //     std::cout << " cell id is " << cell->i << ", " << cell->j <<
+//         ", "
+//         //               << cell->k << std::endl;
+//         //     exit(0);
+//         // }
+//         // if (cell->i == 0 && cell->j == 0 && cell->k == 16)
+//         // {
+//         //     std::cout << " cell velocity star is " << cell->velocityStar
+//         //               << std::endl;
+//         //     std::cout << " cell velocity old is " << cell->velocity
+//         //               << std::endl;
+//         //     std::cout << " cell velocity mass " << cell->mass <<
+//         std::endl;
+//         //     std::cout << " cell id is " << cell->i << ", " << cell->j <<
+//         ", "
+//         //               << cell->k << std::endl;
+//         //     // exit(0);
+//         // }
+//     }
+
+//     // TODO the above loop shall be combined with collision Grid when Parfor
+//     gridCollisionTest();
+// }
 
 // #if ENABLE_IMPLICIT
 // Solve linear system for implicit velocities
-void GridMesh::implicitVelocities()
+void GridMesh::implicitUpdateGridVelocity()
 {
     // TODO
-
-    // With an explicit solution, we compute vf = vi + (f[n]/m)*dt
-    // But for implicit, we use the force at the next timestep, f[n+1]
-    // Stomakhin interpolates between the two, using IMPLICIT_RATIO
-    // If we call v* the explicit vf, we can do some algebra and get
-    //	v* = vf - IMPLICIT_RATION*dt*(df/m)
-    // The problem is, df (change in force from n to n+1) depends on vf,
-    // so we can't just compute it directly; instead, we use an iterative
-    // method (conjugate residuals) to find what vf should be. We make an
-    // initial guess of what vf should be (setting it to v*) and then
-    // iteratively refine our guess until the error is small enough.
-
-    // // INITIALIZE LINEAR SOLVE
-    // for (int idx = 0; idx < nodes_length; idx++)
-    // {
-    //     GridNode& n = nodes[idx];
-    //     n.imp_active = n.active;
-    //     if (n.imp_active)
-    //     {
-    //         // recomputeImplicitForces will compute Er, given r
-    //         // Initially, we want vf - E*vf; so we'll temporarily set r to vf
-    //         n.r.setData(n.velocity_new);
-    //         // Also set the error to 1
-    //         n.err.setData(1);
-    //     }
-    // }
-    // // As said before, we need to compute vf-E*vf as our initial "r" residual
-    // recomputeImplicitForces();
-    // for (int idx = 0; idx < nodes_length; idx++)
-    // {
-    //     GridNode& n = nodes[idx];
-    //     if (n.imp_active)
-    //     {
-    //         n.r = n.velocity_new - n.Er;
-    //         // p starts out equal to residual
-    //         n.p = n.r;
-    //         // cache r.dot(Er)
-    //         n.rEr = n.r.dot(n.Er);
-    //     }
-    // }
-    // // Since we updated r, we need to recompute Er
-    // recomputeImplicitForces();
-    // // Ep starts out the same as Er
-    // for (int idx = 0; idx < nodes_length; idx++)
-    // {
-    //     GridNode& n = nodes[idx];
-    //     if (n.imp_active) n.Ep = n.Er;
-    // }
-
-    // // LINEAR SOLVE
-    // for (int i = 0; i < MAX_IMPLICIT_ITERS; i++)
-    // {
-    //     bool done = true;
-    //     for (int idx = 0; idx < nodes_length; idx++)
-    //     {
-    //         GridNode& n = nodes[idx];
-    //         // Only perform calculations on nodes that haven't been solved
-    //         yet if (n.imp_active)
-    //         {
-    //             // Alright, so we'll handle each node's solve separately
-    //             // First thing to do is update our vf guess
-    //             float div = n.Ep.dot(n.Ep);
-    //             float alpha = n.rEr / div;
-    //             n.err = alpha * n.p;
-    //             // If the error is small enough, we're done
-    //             float err = n.err.length();
-    //             if (err < MAX_IMPLICIT_ERR || err > MIN_IMPLICIT_ERR ||
-    //                 isnan(err))
-    //             {
-    //                 n.imp_active = false;
-    //                 continue;
-    //             }
-    //             else
-    //                 done = false;
-    //             // Update vf and residual
-    //             n.velocity_new += n.err;
-    //             n.r -= alpha * n.Ep;
-    //         }
-    //     }
-    //     // If all the velocities converged, we're done
-    //     if (done) break;
-    //     // Otherwise we recompute Er, so we can compute our next guess
-    //     recomputeImplicitForces();
-    //     // Calculate the gradient for our next guess
-    //     for (int idx = 0; idx < nodes_length; idx++)
-    //     {
-    //         GridNode& n = nodes[idx];
-    //         if (n.imp_active)
-    //         {
-    //             float temp = n.r.dot(n.Er);
-    //             float beta = temp / n.rEr;
-    //             n.rEr = temp;
-    //             // Update p
-    //             n.p *= beta;
-    //             n.p += n.r;
-    //             // Update Ep
-    //             n.Ep *= beta;
-    //             n.Ep += n.Er;
-    //         }
-    //     }
-    // }
 }
+
 void GridMesh::recomputeImplicitForces()
 {
-    // for (int i = 0; i < obj->size; i++)
-    // {
-    //     Particle& p = obj->particles[i];
-    //     int ox = p.grid_position[0], oy = p.grid_position[1];
-    //     for (int idx = 0, y = oy - 1, y_end = y + 3; y <= y_end; y++)
-    //     {
-    //         for (int x = ox - 1, x_end = x + 3; x <= x_end; x++, idx++)
-    //         {
-    //             GridNode& n = nodes[(int)(y * size[0] + x)];
-    //             if (n.imp_active)
-    //             {
-    //                 // I don't think there is any way to cache intermediary
-    //                 // results for reuse with each iteration, unfortunately
-    //                 n.force += p.deltaForce(n.r, p.weight_gradient[idx]);
-    //             }
-    //         }
-    //     }
-    // }
-
-    // // We have delta force for each node; to get Er, we use the following
-    // // formula: 	r - IMPLICIT_RATIO*TIMESTEP*delta_force/mass
-    // for (int idx = 0; idx < nodes_length; idx++)
-    // {
-    //     GridNode& n = nodes[idx];
-    //     if (n.imp_active)
-    //         n.Er = n.r - IMPLICIT_RATIO * TIMESTEP / n.mass * n.force;
-    // }
+    // TODO
 }
 // #endif
 
 // Map grid velocities back to particles
-void GridMesh::updateVelocities() const
+void GridMesh::mapVelocityToSPS() const
 {
-    // TODO
-    // for (int i = 0; i < obj->size; i++)
-    // {
-    //     Particle& p = obj->particles[i];
-    //     // We calculate PIC and FLIP velocities separately
-    //     Vector2f pic, flip = p.velocity;
-    //     // Also keep track of velocity gradient
-    //     Matrix2f& grad = p.velocity_gradient;
-    //     grad.setData(0.0);
-    //     // VISUALIZATION PURPOSES ONLY:
-    //     // Recompute density
-    //     p.density = 0;
+#pragma omp parallel for
+    for (int i = 0; i < SPS->particles.size(); i++)
+    {
+        // map back to particles
+        {
+            SnowParticle* p = SPS->particles[i];
+            // position
+            Vector3f pos = p->position - bbox.pMin;
+            // We calculate Vpic and VFLIP velocities separately
+            Vector3f Vpic = Vector3f::Zero();
+            Vector3f Vflip = p->velocity;
+            // Also keep track of velocity gradient
+            Matrix3f& grad = p->velocityGradient;
+            grad.setZero();
+            // VISUALIZATION PURPOSES ONLY:
+            // Recompute density
+            p->density = 0;
 
-    //     int ox = p.grid_position[0], oy = p.grid_position[1];
-    //     for (int idx = 0, y = oy - 1, y_end = y + 3; y <= y_end; y++)
-    //     {
-    //         for (int x = ox - 1, x_end = x + 3; x <= x_end; x++, idx++)
-    //         {
-    //             float w = p.weights[idx];
-    //             if (w > BSPLINE_EPSILON)
-    //             {
-    //                 GridNode& node = nodes[(int)(y * size[0] + x)];
-    //                 // Particle in cell
-    //                 pic += node.velocity_new * w;
-    //                 // Fluid implicit particle
-    //                 flip += (node.velocity_new - node.velocity) * w;
-    //                 // Velocity gradient
-    //                 grad +=
-    //                     node.velocity_new.outer_product(p.weight_gradient[idx]);
-    //                 // VISUALIZATION ONLY: Update density
-    //                 p.density += w * node.mass;
-    //             }
-    //         }
-    //     }
-    //     // Final velocity is a linear combination of PIC and FLIP components
-    //     p.velocity = flip * FLIP_PERCENT + pic * (1 - FLIP_PERCENT);
-    //     // VISUALIZATION: Update density
-    //     p.density /= node_area;
-    // }
-    collisionParticles();
+            for (int countForAdjGrid = 0, px = (int)(pos.x() / cellSize.x()),
+                     ipx = px - 1, pxEnd = px + 3;
+                 ipx < pxEnd; ipx++)
+            {
+                if (ipx >= 0 && ipx < cellNum.x())
+                {
+                    for (int py = (int)(pos.y() / cellSize.y()), ipy = py - 1,
+                             pyEnd = py + 3;
+                         ipy < pyEnd; ipy++)
+                    {
+                        if (ipy >= 0 && ipy < cellNum.y())
+                        {
+                            for (int pz = (int)(pos.z() / cellSize.z()),
+                                     ipz = pz - 1, pzEnd = pz + 3;
+                                 ipz < pzEnd; ipz++)
+                            {
+                                if (ipz >= 0 && ipz < cellNum.z())
+                                {
+                                    float w = p->weights[countForAdjGrid];
+                                    Vector3f wGrad =
+                                        p->weight_gradient[countForAdjGrid];
+                                    if (w > BSPLINE_EPSILON)
+                                    {
+                                        GridCell* cell = cells[(
+                                            int)(ipx * cellNum.y() *
+                                                     cellNum.z() +
+                                                 ipy * cellNum.z() + ipz)];
+                                        // Particle in cell
+                                        Vpic += cell->velocityStar * w;
+                                        // Fluid implicit particle
+                                        Vflip += (cell->velocityStar -
+                                                  cell->velocity) *
+                                                 w;
+                                        // Velocity gradient
+                                        grad += cell->velocityStar *
+                                                wGrad.transpose();
+                                        // VISUALIZATION ONLY: Update density
+                                        p->density += w * cell->mass;
+                                        // test
+                                        // if (isnan(Vflip.norm()))
+                                        // {
+                                        //     std::cout << " vel flip is " <<
+                                        //     Vflip
+                                        //               << std::endl;
+                                        //     std::cout << " cell active "
+                                        //               << cell->active <<
+                                        //               std::endl;
+                                        //     std::cout << " cell id is " <<
+                                        //     ipx
+                                        //               << ", " << ipy << ", "
+                                        //               << ipz
+                                        //               << std::endl;
+                                        //     std::cout << " cell id is " <<
+                                        //     cell->i
+                                        //               << ", " << cell->j <<
+                                        //               ", "
+                                        //               << cell->k <<
+                                        //               std::endl;
+                                        //     std::cout << " cell velocity star
+                                        //     is
+                                        //     "
+                                        //               << cell->velocityStar
+                                        //               << std::endl;
+                                        //     std::cout << " cell velocity old
+                                        //     is "
+                                        //               << cell->velocity
+                                        //               << std::endl;
+                                        //     exit(0);
+                                        // }
+                                        // if (isnan(Vpic.norm()))
+                                        // {
+                                        //     std::cout << " vel pic is " <<
+                                        //     Vpic
+                                        //               << std::endl;
+                                        // }
+                                    }
+                                }
+                                // do it or not, it has goto next cell
+                                countForAdjGrid++;
+                            }
+                        }
+                        else
+                        {
+                            // do nothing and skip this z edge
+                            countForAdjGrid += 4;
+                        }
+                    }
+                }
+                else
+                {
+                    // do nothing and skip this yz face
+                    countForAdjGrid += 16;
+                }
+            }
+            // Final velocity is a linear combination of Vpic and VFLIP
+            // components
+            p->velocity = Vflip * FLIP_PERCENT + Vpic * (1. - FLIP_PERCENT);
+            // if (isnan(Vflip.norm()))
+            // {
+            //     std::cout << " vel flip is " << Vflip << std::endl;
+            // }
+            // if (isnan(Vpic.norm()))
+            // {
+            //     std::cout << " vel pic is " << Vpic << std::endl;
+            // }
+            // VISUALIZATION: Update density
+            p->density /= eachCellVolume;
+        }
+        // collision test
+        {
+            // collision test
+            SnowParticle* p = SPS->particles[i];
+            Vector3f tempPos = p->position + deltaT * p->velocity;
+            // x dir
+            if (tempPos.x() > bbox.pMax.x() || tempPos.x() < bbox.pMin.x())
+            {
+                Vector3f VSolid(0, 0, 0);
+                Vector3f VRel = p->velocity - VSolid;
+                Vector3f Vn = Vector3f(VRel.x(), 0, 0);
+                Vector3f Vt = Vector3f(0, VRel.y(), VRel.z());
+                float vn = Vn.norm();
+                float vt = Vt.norm();
+                float mu = p->m->sticky;
+                if (vt < mu * vn || vt < 1.e-12)
+                {
+                    VRel.setZero();
+                }
+                else
+                {
+                    VRel = (1. - mu * vn / vt) * Vt;
+                }
+                p->velocity = VRel + VSolid;
+            }
+            // y dir
+            if (tempPos.y() > bbox.pMax.y() || tempPos.y() < bbox.pMin.y())
+            {
+                Vector3f VSolid(0, 0, 0);
+                Vector3f VRel = p->velocity - VSolid;
+                Vector3f Vn = Vector3f(0, VRel.y(), 0);
+                Vector3f Vt = Vector3f(VRel.x(), 0, VRel.z());
+                float vn = Vn.norm();
+                float vt = Vt.norm();
+                float mu = p->m->sticky;
+                if (vt < mu * vn || vt < 1.e-12)
+                {
+                    VRel.setZero();
+                }
+                else
+                {
+                    VRel = (1. - mu * vn / vt) * Vt;
+                }
+                p->velocity = VRel + VSolid;
+            }
+            // z dir
+            if (tempPos.z() > bbox.pMax.z() || tempPos.z() < bbox.pMin.z())
+            {
+                Vector3f VSolid(0, 0, 0);
+                Vector3f VRel = p->velocity - VSolid;
+                Vector3f Vn = Vector3f(0, 0, VRel.z());
+                Vector3f Vt = Vector3f(VRel.x(), VRel.y(), 0);
+                float vn = Vn.norm();
+                float vt = Vt.norm();
+                float mu = p->m->sticky;
+                if (vt < mu * vn || vt < 1.e-12)
+                {
+                    VRel.setZero();
+                }
+                else
+                {
+                    VRel = (1. - mu * vn / vt) * Vt;
+                }
+                p->velocity = VRel + VSolid;
+            }
+            // TODO there are more collisions
+            // Finish collision test
+            // Now push Particles Postion
+            p->updatePos();
+            // update pure elastic deformation
+            p->updatePureElasticGradient();
+            // push excessive part to plastic deformation
+            p->updateCombinedPElasticGradient();
+        }
+    }
 }
 
-void GridMesh::collisionGrid()
-{
-    // TODO
-    // Vector2f delta_scale = Vector2f(TIMESTEP);
-    // delta_scale /= cellsize;
-    // for (int y = 0, idx = 0; y < size[1]; y++)
-    // {
-    //     for (int x = 0; x < size[0]; x++, idx++)
-    //     {
-    //         // Get grid node (equivalent to (y*size[0] + x))
-    //         GridNode& node = nodes[idx];
-    //         // Check to see if this node needs to be computed
-    //         if (node.active)
-    //         {
-    //             // Collision response
-    //             // TODO: make this work for arbitrary collision geometry
-    //             Vector2f new_pos =
-    //                 node.velocity_new * delta_scale + Vector2f(x, y);
-    //             // Left border, right border
-    //             if (new_pos[0] < BSPLINE_RADIUS ||
-    //                 new_pos[0] > size[0] - BSPLINE_RADIUS - 1)
-    //             {
-    //                 node.velocity_new[0] = 0;
-    //                 node.velocity_new[1] *= STICKY;
-    //             }
-    //             // Bottom border, top border
-    //             if (new_pos[1] < BSPLINE_RADIUS ||
-    //                 new_pos[1] > size[1] - BSPLINE_RADIUS - 1)
-    //             {
-    //                 node.velocity_new[0] *= STICKY;
-    //                 node.velocity_new[1] = 0;
-    //             }
-    //         }
-    //     }
-    // }
-}
-void GridMesh::collisionParticles() const
-{
-    // TODO
-    //     for (int i = 0; i < obj->size; i++)
-    //     {
-    //         Particle& p = obj->particles[i];
-    //         Vector2f new_pos = p.grid_position + TIMESTEP * p.velocity /
-    //         cellsize;
-    //         // Left border, right border
-    //         if (new_pos[0] < BSPLINE_RADIUS - 1 ||
-    //             new_pos[0] > size[0] - BSPLINE_RADIUS)
-    //             p.velocity[0] = -STICKY * p.velocity[0];
-    //         // Bottom border, top border
-    //         if (new_pos[1] < BSPLINE_RADIUS - 1 ||
-    //             new_pos[1] > size[1] - BSPLINE_RADIUS)
-    //             p.velocity[1] = -STICKY * p.velocity[1];
-    //     }
-}
+// void GridMesh::gridCollisionTest()
+// {
+//     for (int iCell = 0; iCell < totalEffectiveCellNum; iCell++)
+//     {
+//         // int i = iCell / (cellNum.y() * cellNum.z());
+//         // int j = (iCell % (cellNum.y() * cellNum.z())) / cellNum.z();
+//         // int k = iCell % cellNum.z();
+
+//         // int iCell = i * cellNum.y() * cellNum.z() + j * cellNum.z() + k;
+//         GridCell* cell = cells[iCell];
+//         int i = cell->i;
+//         int j = cell->j;
+//         int k = cell->k;
+//         // collision test
+//         Vector3f oldCellPos((i + 0.5) * cellSize.x(), (j + 0.5) *
+//         cellSize.y(),
+//                             (k + 0.5) * cellSize.z());
+//         Vector3f tempPos = oldCellPos + deltaT * cell->velocityStar;
+//         // TODO consider wrap this fixing vel as a function
+//         // x dir
+//         if (tempPos.x() > bbox.pMax.x() || tempPos.x() < bbox.pMin.x())
+//         {
+//             Vector3f VSolid(0, 0, 0);
+//             Vector3f VRel = cell->velocityStar - VSolid;
+//             Vector3f Vn = Vector3f(VRel.x(), 0, 0);
+//             Vector3f Vt = Vector3f(0, VRel.y(), VRel.z());
+//             float vn = Vn.norm();
+//             float vt = Vt.norm();
+//             // TODO this mu calculation should be cleverer
+//             float mu = SPS->particles[0]->m->sticky;
+//             if (vt < mu * vn || vt < 1.e-12)
+//             {
+//                 VRel.setZero();
+//             }
+//             else
+//             {
+//                 VRel = (1. - mu * vn / vt) * Vt;
+//             }
+//             cell->velocityStar = VRel + VSolid;
+//             // std::cout << " cell velocity star is " << cell->velocityStar
+//             //           << std::endl;
+//         }
+//         // y dir
+//         if (tempPos.y() > bbox.pMax.y() || tempPos.y() < bbox.pMin.y())
+//         {
+//             Vector3f VSolid(0, 0, 0);
+//             Vector3f VRel = cell->velocityStar - VSolid;
+//             Vector3f Vn = Vector3f(0, VRel.y(), 0);
+//             Vector3f Vt = Vector3f(VRel.x(), 0, VRel.z());
+//             float vn = Vn.norm();
+//             float vt = Vt.norm();
+//             // TODO this mu calculation should be cleverer
+//             float mu = SPS->particles[0]->m->sticky;
+//             if (vt < mu * vn || vt < 1.e-12)
+//             {
+//                 VRel.setZero();
+//             }
+//             else
+//             {
+//                 VRel = (1. - mu * vn / vt) * Vt;
+//             }
+//             cell->velocityStar = VRel + VSolid;
+//             // std::cout << " cell velocity star is " << cell->velocityStar
+//             //           << std::endl;
+//         }
+//         // z dir
+//         if (tempPos.z() > bbox.pMax.z() || tempPos.z() < bbox.pMin.z())
+//         {
+//             Vector3f VSolid(0, 0, 0);
+//             Vector3f VRel = cell->velocityStar - VSolid;
+//             Vector3f Vn = Vector3f(0, 0, VRel.z());
+//             Vector3f Vt = Vector3f(VRel.x(), VRel.y(), 0);
+//             float vn = Vn.norm();
+//             float vt = Vt.norm();
+//             // TODO this mu calculation should be cleverer
+//             float mu = SPS->particles[0]->m->sticky;
+//             if (vt < mu * vn || vt < 1.e-12)
+//             {
+//                 VRel.setZero();
+//             }
+//             else
+//             {
+//                 VRel = (1. - mu * vn / vt) * Vt;
+//             }
+//             cell->velocityStar = VRel + VSolid;
+//             // std::cout << " cell velocity star is " << cell->velocityStar
+//             //           << std::endl;
+//         }
+//         // TODO there are more collisions
+//         // Finish collision test
+
+//         // if (isnan(cell->velocityStar.norm()))
+//         // {
+//         //     std::cout << " cell velocity star is " << cell->velocityStar
+//         //               << std::endl;
+//         //     std::cout << " cell velocity old is " << cell->velocity
+//         //               << std::endl;
+//         //     std::cout << " cell velocity mass " << cell->mass <<
+//         std::endl;
+//         //     std::cout << " cell id is " << cell->i << ", " << cell->j <<
+//         ", "
+//         //               << cell->k << std::endl;
+//         //     exit(0);
+//         // }
+//     }
+//     // if (cell->i == 0 && cell->j == 0 && cell->k == 16)
+//     // {
+//     //     std::cout << " cell velocity star is " << cell->velocityStar
+//     //               << std::endl;
+//     //     std::cout << " cell velocity old is " << cell->velocity <<
+//     std::endl;
+//     //     std::cout << " cell velocity mass " << cell->mass << std::endl;
+//     //     std::cout << " cell id is " << cell->i << ", " << cell->j << ", "
+//     //               << cell->k << std::endl;
+//     //     // exit(0);
+//     // }
+// }
+
+// void GridMesh::particleCollisionTest() const
+// {
+//     // Try to write all particles' update here
+//     // instead of creating new for loops later, better for parfor
+//     // Now collision only happens in the bbox of the grid
+
+//     for (int i = 0; i < SPS->particles.size(); i++)
+//     {
+//         // collision test
+//         SnowParticle* p = SPS->particles[i];
+//         Vector3f tempPos = p->position + deltaT * p->velocity;
+//         // x dir
+//         if (tempPos.x() > bbox.pMax.x() || tempPos.x() < bbox.pMin.x())
+//         {
+//             Vector3f VSolid(0, 0, 0);
+//             Vector3f VRel = p->velocity - VSolid;
+//             Vector3f Vn = Vector3f(VRel.x(), 0, 0);
+//             Vector3f Vt = Vector3f(0, VRel.y(), VRel.z());
+//             float vn = Vn.norm();
+//             float vt = Vt.norm();
+//             float mu = p->m->sticky;
+//             if (vt < mu * vn || vt < 1.e-12)
+//             {
+//                 VRel.setZero();
+//             }
+//             else
+//             {
+//                 VRel = (1. - mu * vn / vt) * Vt;
+//             }
+//             p->velocity = VRel + VSolid;
+//         }
+//         // y dir
+//         if (tempPos.y() > bbox.pMax.y() || tempPos.y() < bbox.pMin.y())
+//         {
+//             Vector3f VSolid(0, 0, 0);
+//             Vector3f VRel = p->velocity - VSolid;
+//             Vector3f Vn = Vector3f(0, VRel.y(), 0);
+//             Vector3f Vt = Vector3f(VRel.x(), 0, VRel.z());
+//             float vn = Vn.norm();
+//             float vt = Vt.norm();
+//             float mu = p->m->sticky;
+//             if (vt < mu * vn || vt < 1.e-12)
+//             {
+//                 VRel.setZero();
+//             }
+//             else
+//             {
+//                 VRel = (1. - mu * vn / vt) * Vt;
+//             }
+//             p->velocity = VRel + VSolid;
+//         }
+//         // z dir
+//         if (tempPos.z() > bbox.pMax.z() || tempPos.z() < bbox.pMin.z())
+//         {
+//             Vector3f VSolid(0, 0, 0);
+//             Vector3f VRel = p->velocity - VSolid;
+//             Vector3f Vn = Vector3f(0, 0, VRel.z());
+//             Vector3f Vt = Vector3f(VRel.x(), VRel.y(), 0);
+//             float vn = Vn.norm();
+//             float vt = Vt.norm();
+//             float mu = p->m->sticky;
+//             if (vt < mu * vn || vt < 1.e-12)
+//             {
+//                 VRel.setZero();
+//             }
+//             else
+//             {
+//                 VRel = (1. - mu * vn / vt) * Vt;
+//             }
+//             p->velocity = VRel + VSolid;
+//         }
+//         // TODO there are more collisions
+//         // Finish collision test
+//         // Now push Particles Postion
+//         p->updatePos();
+//         // update pure elastic deformation
+//         p->updatePureElasticGradient();
+//         // push excessive part to plastic deformation
+//         p->updateCombinedPElasticGradient();
+//     }
+// }

@@ -21,26 +21,22 @@ SimDomain::~SimDomain()
 
 void SimDomain::initializeSimulator()
 {
-    gridMesh->initializeMass();
-    gridMesh->calculateVolumes();
+    gridMesh->initializeGridMeshActiveMassAndMomentum();
+    gridMesh->calculateParticleVolume();
 }
 
 void SimDomain::oneTimeSimulate()
 {
+    gridMesh->initializeGridMeshActiveMassAndMomentum();
+    // correct delta T after initialize grid mass
+    // this is because the first one has to be serial
+    // so why not just get the maxV here
     deltaT = correctedDeltaT();
-    gridMesh->initializeMass();
-    gridMesh->initializeVelocities();
     // gravity
     Vector3f g(0, GRAVITY, 0);
-    gridMesh->explicitVelocities(g);
-    // TODO after finish explicit then do implicit
-    // #if ENABLE_IMPLICIT
-    //     if (IMPLICIT_RATIO > 0) grid->implicitVelocities();
-    // #endif
+    gridMesh->updateVelocityInGrids(g);
     // Map back to particles
-    gridMesh->updateVelocities();
-    // Update particle data
-    SPS->update();
+    gridMesh->mapVelocityToSPS();
     currentTime += deltaT;
 }
 
@@ -50,8 +46,6 @@ float SimDomain::correctedDeltaT()
     float dt;
     if (prevMaxVelocity > 1.e-8)
     {
-        // We should really take the min(cellsize) I think, if the grid is not
-        // square
         float minCellSize =
             std::min(std::min(gridMesh->cellSize[0], gridMesh->cellSize[1]),
                      gridMesh->cellSize[2]);
