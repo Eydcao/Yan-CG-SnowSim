@@ -22,6 +22,10 @@ Owning to the limited time of this final project, the interactive part is yet fi
 
 The default scene (by 10/May/2020) is "two cows bouncing into each other", and there is also "a very thin snow layer on the floor" to show two cows' trajectory.
 
+![](images/0.png "time = 0.0s")
+
+![](images/6.png "time = 0.1s")
+
 ## TODO List
 
 Again, due to the deadline (by 10/May/2020), there are many things I would like to implement but cannot finish on time.
