@@ -596,27 +596,36 @@ int main(int argc, char** argv)
     // end tests
 #endif
 
-    // snow sim
+    // cow
+    // SnowParticleMaterial m;
+    // m.lNumDensity = 35;
+    // MeshTriangle cow("../media/spot_triangulated_good.obj");
+    // globalSPS = new SnowParticleSet();
+    // globalSPS->addParticlesInAShape(&cow, 10. * Vector3f(0.2, 0, -1.), &m);
+    // SnowParticleSet mirroredCow;
+    // mirroredCow.CreateMirror(*globalSPS, 0, 0, 1., 2.5, Vector3f(0, 0,
+    // -2.5)); globalSPS->appendSet(mirroredCow); Bounds3 bbox(Vector3f(-1., 0,
+    // -7.), Vector3f(1., 0, 1.5)); bbox = Union(bbox, cow.getBounds());
+    // // add a carpet of snow using the bbox and rectangle
+    // Vector3f floorP0(bbox.pMin);
+    // Vector3f floorP1(bbox.pMax);
+    // floorP1.y() = floorP0.y() - 0.06;
+    // Rectangular floor(floorP0, floorP1);
+    // globalSPS->addParticlesInAShape(&floor, &m);
+    // bbox = Union(bbox, floor.getBounds());
+
+    // unit test sphere collide
     SnowParticleMaterial m;
-    m.lNumDensity = 35;
-    MeshTriangle cow("../media/spot_triangulated_good.obj");
+    m.lNumDensity = 100;
     globalSPS = new SnowParticleSet();
-    globalSPS->addParticlesInAShape(&cow, 10. * Vector3f(0.2, 0, -1.), &m);
-    SnowParticleSet mirroredCow;
-    mirroredCow.CreateMirror(*globalSPS, 0, 0, 1., 2.5, Vector3f(0, 0, -2.5));
-    globalSPS->appendSet(mirroredCow);
-    Bounds3 bbox(Vector3f(-1., 0, -7.), Vector3f(1., 0, 1.5));
-    bbox = Union(bbox, cow.getBounds());
-    // add a carpet of snow using the bbox and rectangle
-    Vector3f floorP0(bbox.pMin);
-    Vector3f floorP1(bbox.pMax);
-    floorP1.y() = floorP0.y() - 0.06;
-    Rectangular floor(floorP0, floorP1);
-    globalSPS->addParticlesInAShape(&floor, &m);
-    bbox = Union(bbox, floor.getBounds());
+    Sphere sp1(Vector3f(0.0, 1.5, 0.0), 0.1);
+    Rectangular sp2(Vector3f(1.9, 1.4, -0.1), Vector3f(2.1, 1.6, 0.1));
+    globalSPS->addParticlesInAShape(&sp1, Vector3f(10.0, 0, 0.0), &m);
+    globalSPS->addParticlesInAShape(&sp2, Vector3f(-10.0, 0, 0.0), &m);
+    Bounds3 bbox(Vector3f(-1., 0, -0.2), Vector3f(3., 2., 0.2));
 
     // Mesh grid and simulation domain
-    globalGridMesh = new GridMesh(bbox, Vector3f(.05, .05, .05), globalSPS);
+    globalGridMesh = new GridMesh(bbox, Vector3f(0.02, 0.02, 0.02), globalSPS);
     globalSimDomain = new SimDomain(globalSPS, globalGridMesh);
     globalSimDomain->initializeSimulator();
 
