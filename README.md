@@ -41,4 +41,4 @@ A General TODO list is provided below. Any questions related to the fulfillment,
 ## Related Links
 - For more details of the open course GAMES 101, please refer to the [link](https://sites.cs.ucsb.edu/~lingqi/teaching/games101.html).
 - For the full copy of the paper, please refer to the [link](https://dl.acm.org/doi/10.1145/2461912.2461948). The copyright holders grant permission to study or personal use without commercial purposes FOR FREE.
-- For the collection of my implementations of all assignments of GAMES 101, please refer to this [repository](https://github.com/Eydcao/YanCG).
+- I have deleted all my implementations of the homeworks to obey the honor code.
